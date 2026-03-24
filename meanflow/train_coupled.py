@@ -6,7 +6,7 @@ import time
 from pathlib import Path
 
 from functools import partial
-
+from data_loaders.grayscott_loader import GrayScottCoupledDataset, build_grayscott_dataloader
 import numpy as np
 import torch
 import torch.backends.cudnn as cudnn
@@ -41,6 +41,21 @@ def print_model(model):
 
 
 def get_data_loader(args, is_for_fid):
+    
+    if args.dataset == "grayscott":
+        print("load grayscott...")
+        train_set, train_loader = build_grayscott_dataloader(
+        data_path="/mnt/disk1/khiemtt/FlowCoupledPDE/data_generator/gray-scott/dynamicalsystems_dataset/datasets/gs.pt",
+        split="train",
+        batch_size=16,
+        num_workers=4,
+        horizon=1,
+        normalize=False,
+        )
+        return data_loader
+
+
+
     if args.dataset == "cifar10":
         transforms = get_transform_cifar(is_for_fid)
         dataset = datasets.CIFAR10(

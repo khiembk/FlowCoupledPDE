@@ -25,7 +25,7 @@ def get_args_parser():
     parser.add_argument("--ema_decays", default=[0.99995, 0.9996], nargs="+", type=float, help="Extra EMA decay rates.")
 
     # Dataset parameters
-    parser.add_argument("--dataset", default='cifar10', type=str, choices=['cifar10', 'mnist'], help="Dataset to use.")
+    parser.add_argument("--dataset", default='cifar10', type=str, help="Dataset to use.")
     parser.add_argument("--data_path", default="./data", type=str, help="data root folder with train, val and test subfolders")
 
     parser.add_argument("--output_dir", default="./output_dir", help="path where to save, empty for no saving")
