@@ -47,15 +47,18 @@ class CoupledFlow(nn.Module):
         # [B] -> [B, 1, 1, 1, ...]
         return t.view(-1, *([1] * (x.ndim - 1)))
 
-    def build_zt(self, z1_1, z1_2, z0_1, z0_2, t):
-       
-        zt_1 = (1.0 - t) * z0_1 + t * z1_1
-        zt_2 = (1.0 - t) * z0_2 + t * z1_2
-        return zt_1, zt_2
+    def naive_build_zt_vt(self, source_1, source_2, target_1, target_2, t):
+        
+        # naive implementation 
 
-    def build_velocity(self, z1, z0):
-       
-        return z1 - z0
+        zt_1 = (1.0 - t) * target_1 + t * source_1
+        zt_2 = (1.0 - t) * target_2 + t * source_2
+        v_t_1 = source_1 - target_1
+        v_t_2 = source_2 - target_2
+
+        return zt_1, zt_2, v_t_1, v_t_2
+
+   
 
     def _u1(self, z1, z2, t, r, net=None):
         net = self.net1 if net is None else net
@@ -102,53 +105,60 @@ class CoupledFlow(nn.Module):
         sq = (u_pred - u_tgt.detach()).flatten(1).sum(dim=1)
         return self._adaptive_reduce(sq)
 
-    def _global_loss(self, z1_1, z1_2, z0_1, z0_2):
-        device = z1_1.device
-        dtype = z1_1.dtype
-        bsz = z1_1.shape[0]
+    
+
+    def forward_global_loss(self, source_1, source_2, target_1, target_2):
+        device = source_1.device
+        dtype = source_1.dtype
+        bsz = source_1.shape[0]
 
         t1 = torch.ones(bsz, device=device, dtype=dtype)
         r0 = torch.zeros(bsz, device=device, dtype=dtype)
-        t1_b = self._expand_time_like(t1, z1_1)
-        r0_b = self._expand_time_like(r0, z1_1)
+        t1_b = self._expand_time_like(t1, source_1)
+        r0_b = self._expand_time_like(r0, source_1)
 
-        v1 = self.build_velocity(z1_1, z0_1)
-        v2 = self.build_velocity(z1_2, z0_2)
+        v1_global =  source_1 - target_1
+        v2_global =  source_2 - target_2
 
-        u1 = self._u1(z1_1, z1_2, t1_b, r0_b, net=self.net1)
-        u2 = self._u2(z1_1, z1_2, t1_b, r0_b, net=self.net2)
+        u1 = self._u1(source_1, source_2, t1_b, r0_b, net=self.net1)
+        u2 = self._u2(source_1, source_2, t1_b, r0_b, net=self.net2)
 
-        sq1 = (u1 - v1).flatten(1).sum(dim=1)
-        sq2 = (u2 - v2).flatten(1).sum(dim=1)
+        sq1 = (u1 - v1_global).flatten(1).sum(dim=1)
+        sq2 = (u2 - v2_global).flatten(1).sum(dim=1)
 
         return self._adaptive_reduce(sq1) + self._adaptive_reduce(sq2)
 
-    def forward_with_loss(self, z1_1, z1_2, z0_1, z0_2):
+    def forward_local_loss(self, source_1, source_2, target_1, target_2):
        
         
-        device = z1_1.device
-        dtype = z1_1.dtype
+        device = source_1.device
+        dtype = source_1.dtype
 
-        t, r = sample_two_timesteps(self.args, num_samples=z1_1.shape[0], device=device)
+        t, r = sample_two_timesteps(self.args, num_samples= source_1.shape[0], device=device)
         t = t.to(dtype=dtype)
         r = r.to(dtype=dtype)
 
-        t_b = self._expand_time_like(t, z1_1)
-        r_b = self._expand_time_like(r, z1_1)
+        t_b = self._expand_time_like(t, source_1)
+        r_b = self._expand_time_like(r, source_1)
 
-        zt_1, zt_2 = self.build_zt(z1_1, z1_2, z0_1, z0_2, t_b)
+        z_t_1, z_t_2, v_t_1, v_t_2 = self.naive_build_zt_vt(source_1, source_2, target_1, target_2, t_b)
 
-        v1 = self.build_velocity(z1_1, z0_1)
-        v2 = self.build_velocity(z1_2, z0_2)
+       
 
-        local1 = self._local_loss_one_process(1, zt_1, zt_2, v1, v2, t_b, r_b)
-        local2 = self._local_loss_one_process(2, zt_1, zt_2, v1, v2, t_b, r_b)
-        global_loss = self._global_loss(z1_1, z1_2, z0_1, z0_2)
+        local1 = self._local_loss_one_process(1, z_t_1, z_t_2, v_t_1, v_t_2, t_b, r_b)
+        local2 = self._local_loss_one_process(2, z_t_1, z_t_2, v_t_1, v_t_2, t_b, r_b)
+        
+        local_loss = local1 + local2
 
-        lambda_local = getattr(self.args, "lambda_local", 1.0)
-        lambda_global = getattr(self.args, "lambda_global", 1.0)
+        return local_loss
+    
 
-        return lambda_global * global_loss + lambda_local * (local1 + local2)
+    def forward_combined_loss(self, source_1, source_2, target_1, target_2, lambda_local = 1, lambda_global = 1):
+        
+        local_loss = self.forward_local_loss(source_1, source_2, target_1, target_2) 
+        global_loss = self.forward_global_loss(source_1, source_2, target_1, target_2)
+        
+        return lambda_global*global_loss + lambda_local*local_loss
 
     @torch.no_grad()
     def sample(self, source_1, source_2, net1=None, net2=None):
