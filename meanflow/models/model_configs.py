@@ -26,6 +26,31 @@ MODEL_CONFIGS = {
     },
 }
 
+net1_configs = {
+    "img_resolution": 32,
+    "in_channels": 2,
+    "out_channels": 1,
+    "channel_mult_noise": 2,
+    "resample_filter": [1, 3, 3, 1],
+    "channel_mult": [2, 2, 2],
+    "encoder_type": "standard",
+    "decoder_type": "standard",
+    "dropout": args.dropout,
+}
+
+net2_configs = {
+    "img_resolution": 32,
+    "in_channels": 2,
+    "out_channels": 1,
+    "channel_mult_noise": 2,
+    "resample_filter": [1, 3, 3, 1],
+    "channel_mult": [2, 2, 2],
+    "encoder_type": "standard",
+    "decoder_type": "standard",
+    "dropout": args.dropout,
+}
+
+
 
 def instantiate_model(args) -> nn.Module:
     architechture = args.arch
@@ -49,11 +74,12 @@ def instantiate_coupled_model(args) -> nn.Module:
         architechture in MODEL_CONFIGS
     ), f"Model architecture {architechture} is missing its config."
 
-    configs = MODEL_CONFIGS[architechture]
-    configs['dropout'] = args.dropout
+    net1_configs = net1_configs
+    net2_configs = net2_configs
     arch = MODEL_ARCHS[architechture]
     if args.use_edm_aug:
-        configs['augment_dim'] = 6
-    model = CoupledFlow(arch=arch, net1_configs=configs, net2_configs= configs, args=args)
+        net1_configs['augment_dim'] = 6
+        net2_configs['augment_dim'] = 6
+    model = CoupledFlow(arch=arch, net1_configs= net1_configs, net2_configs= net2_configs, args=args)
 
     return model
