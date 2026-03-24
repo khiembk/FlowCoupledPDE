@@ -1,10 +1,3 @@
-# Copyright (c) Meta Platforms, Inc. and affiliates.
-# All rights reserved.
-#
-# This source code is licensed under the CC-by-NC license found in the
-# LICENSE file in the root directory of this source tree.
-# Copyright (c) Meta Platforms, Inc. and affiliates.
-
 import datetime
 import logging
 import os
@@ -18,9 +11,8 @@ import numpy as np
 import torch
 import torch.backends.cudnn as cudnn
 import torchvision.datasets as datasets
-from models.model_configs import instantiate_model, instantiate_coupled_model
+from models.model_configs import instantiate_coupled_model
 from train_arg_parser import get_args_parser
-
 from training import distributed_mode
 from training.data_transform import get_transform_cifar, get_transform_mnist
 from training.eval_loop import eval_model

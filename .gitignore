@@ -34,7 +34,7 @@ MANIFEST
 
 # VSCode
 *.vscode
-
+data_generator/gray-scott/dynamicalsystems_dataset/datasets/*
 # Others
 meanflow/outputs
 meanflow/data
