@@ -35,7 +35,7 @@ net1_configs = {
     "channel_mult": [2, 2, 2],
     "encoder_type": "standard",
     "decoder_type": "standard",
-    "dropout": args.dropout,
+    "dropout": 0.2,
 }
 
 net2_configs = {
@@ -47,7 +47,7 @@ net2_configs = {
     "channel_mult": [2, 2, 2],
     "encoder_type": "standard",
     "decoder_type": "standard",
-    "dropout": args.dropout,
+    "dropout": 0.2,
 }
 
 
@@ -74,8 +74,7 @@ def instantiate_coupled_model(args) -> nn.Module:
         architechture in MODEL_CONFIGS
     ), f"Model architecture {architechture} is missing its config."
 
-    net1_configs = net1_configs
-    net2_configs = net2_configs
+    
     arch = MODEL_ARCHS[architechture]
     if args.use_edm_aug:
         net1_configs['augment_dim'] = 6
