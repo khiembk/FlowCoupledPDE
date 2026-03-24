@@ -18,14 +18,14 @@ import numpy as np
 import torch
 import torch.backends.cudnn as cudnn
 import torchvision.datasets as datasets
-from models.model_configs import instantiate_model
+from models.model_configs import instantiate_model, instantiate_coupled_model
 from train_arg_parser import get_args_parser
 
 from training import distributed_mode
 from training.data_transform import get_transform_cifar, get_transform_mnist
 from training.eval_loop import eval_model
 from training.load_and_save import load_model, save_model
-from training.train_loop import train_one_epoch, train_step
+from training.coupled_training_loop import train_one_epoch, train_step
 from torchmetrics.aggregation import MeanMetric
 import models.rng as rng
 
@@ -131,7 +131,7 @@ def main(args):
 
     # define the model
     logger.info("Initializing Model")
-    model = instantiate_model(args)
+    model = instantiate_coupled_model(args)
 
     model.to(device)
 
