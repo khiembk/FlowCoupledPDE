@@ -1,4 +1,4 @@
-name: meanflow
+name: pdemeanflow
 channels:
   - pytorch
   - conda-forge
