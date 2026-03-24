@@ -75,11 +75,6 @@ def train_local_loss_step(model_without_ddp, *args, **kwargs):
     return loss
 
 
-def maybe_normalize(x: torch.Tensor, args: argparse.Namespace) -> torch.Tensor:
-    
-    if getattr(args, "input_scale", None) is not None:
-        x = x / args.input_scale
-    return x
 
 
 def move_batch_to_device(batch, device):
@@ -123,13 +118,8 @@ def train_one_epoch(
                 f"but got length {len(batch)}"
             )
 
-        z1_1, z1_2, z0_1, z0_2 = move_batch_to_device(batch, device)
+        source_1, source_2, target_1, target_2 = move_batch_to_device(batch, device)
 
-        # PDE-specific normalization hook
-        z1_1 = maybe_normalize(z1_1, args)
-        z1_2 = maybe_normalize(z1_2, args)
-        z0_1 = maybe_normalize(z0_1, args)
-        z0_2 = maybe_normalize(z0_2, args)
 
         # Usually no EDM augmentation for coupled PDE training
         aug_cond = None
@@ -139,10 +129,10 @@ def train_one_epoch(
 
         loss = compiled_train_step(
             model_without_ddp,
-            z1_1,
-            z1_2,
-            z0_1,
-            z0_2,
+            source_1,
+            source_2,
+            target_1,
+            target_2,
             aug_cond,
         )
 
