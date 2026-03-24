@@ -6,7 +6,7 @@
 
 import torch.nn as nn
 from models.meanflow import MeanFlow
-
+from models.coupled_flow import CoupledFlow
 from models.unet import SongUNet
 
 MODEL_ARCHS = {
@@ -39,5 +39,21 @@ def instantiate_model(args) -> nn.Module:
     if args.use_edm_aug:
         configs['augment_dim'] = 6
     model = MeanFlow(arch=arch, net_configs=configs, args=args)
+
+    return model
+
+
+def instantiate_coupled_model(args) -> nn.Module:
+    architechture = args.arch
+    assert (
+        architechture in MODEL_CONFIGS
+    ), f"Model architecture {architechture} is missing its config."
+
+    configs = MODEL_CONFIGS[architechture]
+    configs['dropout'] = args.dropout
+    arch = MODEL_ARCHS[architechture]
+    if args.use_edm_aug:
+        configs['augment_dim'] = 6
+    model = CoupledFlow(arch=arch, net_configs=configs, args=args)
 
     return model
