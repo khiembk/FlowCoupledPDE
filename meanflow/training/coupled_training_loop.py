@@ -81,7 +81,7 @@ def move_batch_to_device(batch, device):
     return [x.to(device, non_blocking=True) for x in batch]
 
 
-def train_one_epoch(
+def train_coupled_one_epoch(
     model: torch.nn.Module,
     compiled_train_step: Callable,
     data_loader: Iterable,
