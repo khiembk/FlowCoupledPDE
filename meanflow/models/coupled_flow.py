@@ -153,7 +153,7 @@ class CoupledFlow(nn.Module):
         return local_loss
     
 
-    def forward_combined_loss(self, source_1, source_2, target_1, target_2, lambda_local = 1, lambda_global = 1):
+    def forward_combined_loss(self, source_1, source_2, target_1, target_2, aug_cond=None, lambda_local = 1, lambda_global = 1):
         print("source_1", source_1.shape)
         print("source_2", source_2.shape)
         print("target_1", target_1.shape)
