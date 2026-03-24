@@ -54,6 +54,6 @@ def instantiate_coupled_model(args) -> nn.Module:
     arch = MODEL_ARCHS[architechture]
     if args.use_edm_aug:
         configs['augment_dim'] = 6
-    model = CoupledFlow(arch=arch, net_configs=configs, args=args)
+    model = CoupledFlow(arch=arch, net1_configs=configs, net2_configs= configs, args=args)
 
     return model

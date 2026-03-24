@@ -17,7 +17,7 @@ from training import distributed_mode
 from training.data_transform import get_transform_cifar, get_transform_mnist
 from training.eval_loop import eval_model
 from training.load_and_save import load_model, save_model
-from training.coupled_training_loop import train_one_epoch, train_step
+from training.coupled_training_loop import train_coupled_one_epoch, train_combined_loss_step, train_local_loss_step
 from torchmetrics.aggregation import MeanMetric
 import models.rng as rng
 
@@ -52,7 +52,7 @@ def get_data_loader(args, is_for_fid):
         horizon=1,
         normalize=False,
         )
-        return data_loader
+        return train_loader
 
 
 
@@ -97,6 +97,7 @@ def get_data_loader(args, is_for_fid):
 
 
 def main(args):
+    print("init distributed mode")
     distributed_mode.init_distributed_mode(args)
 
     print(f"Rank: {distributed_mode.get_rank()}")
@@ -161,12 +162,12 @@ def main(args):
         )
         model_without_ddp = model.module
 
-    optimizer = torch.optim.Adam(  # Note: Adam, not AdamW
-        model_without_ddp.net.parameters(),  # only the "net" parameters
-        lr=args.lr,
-        betas=args.optimizer_betas,
-        weight_decay=0.0
-    )
+    optimizer = torch.optim.Adam(
+    list(model_without_ddp.net1.parameters()) + list(model_without_ddp.net2.parameters()),
+    lr=args.lr,
+    betas=args.optimizer_betas,
+    weight_decay=0.0,
+)
 
     warmup_iters = args.warmup_epochs * len(data_loader_train)
     warmup_scheduler = torch.optim.lr_scheduler.LinearLR(optimizer, start_factor=1e-8 / args.lr, end_factor=1.0, total_iters=warmup_iters,)
@@ -184,7 +185,7 @@ def main(args):
     )
 
     compiled_train_step = torch.compile(
-        train_step,
+        train_combined_loss_step,
         disable=not args.compile,
     )
 
@@ -201,7 +202,7 @@ def main(args):
         if args.distributed:
             data_loader_train.sampler.set_epoch(epoch)
         if not args.eval_only:
-            train_one_epoch(
+            train_coupled_one_epoch(
                 model=model,
                 compiled_train_step=compiled_train_step,
                 data_loader=data_loader_train,
