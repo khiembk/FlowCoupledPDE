@@ -102,7 +102,7 @@ class CoupledFlow(nn.Module):
 
         v_target = v1 if which == 1 else v2
         u_tgt = v_target - (t_b - r_b) * dudt
-        sq = (u_pred - u_tgt.detach()).flatten(1).sum(dim=1)
+        sq = ((u_pred - u_tgt.detach()) ** 2).flatten(1).sum(dim=1)
         return self._adaptive_reduce(sq)
 
     
@@ -123,8 +123,8 @@ class CoupledFlow(nn.Module):
         u1 = self._u1(source_1, source_2, t1_b, r0_b, net=self.net1)
         u2 = self._u2(source_1, source_2, t1_b, r0_b, net=self.net2)
 
-        sq1 = (u1 - v1_global).flatten(1).sum(dim=1)
-        sq2 = (u2 - v2_global).flatten(1).sum(dim=1)
+        sq1 = ((u1 - v1_global) ** 2).flatten(1).sum(dim=1)
+        sq2 = ((u2 - v2_global) ** 2).flatten(1).sum(dim=1)
 
         return self._adaptive_reduce(sq1) + self._adaptive_reduce(sq2)
 

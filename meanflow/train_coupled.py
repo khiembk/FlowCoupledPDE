@@ -15,7 +15,7 @@ from models.model_configs import instantiate_coupled_model
 from train_arg_parser import get_args_parser
 from training import distributed_mode
 from training.data_transform import get_transform_cifar, get_transform_mnist
-from training.eval_loop import eval_model
+
 from training.load_and_save import load_model, save_model
 from training.coupled_training_loop import train_coupled_one_epoch, train_combined_loss_step, train_local_loss_step
 from torchmetrics.aggregation import MeanMetric
@@ -45,10 +45,10 @@ def get_data_loader(args, is_for_fid):
     if args.dataset == "grayscott":
         print("load grayscott...")
         train_set, train_loader = build_grayscott_dataloader(
-        data_path="/mnt/disk1/khiemtt/FlowCoupledPDE/data_generator/gray-scott/dynamicalsystems_dataset/datasets/gs.pt",
+        data_path=args.data_path,
         split="train",
-        batch_size=16,
-        num_workers=4,
+        batch_size=args.batch_size,
+        num_workers=args.num_workers,
         horizon=1,
         normalize=False,
         )
@@ -230,29 +230,36 @@ def main(args):
                 )
                 logging.info(f"Saved checkpoint to {args.output_dir}")
 
-            # Eval ema model:
-            net_eval = model_without_ddp.net_ema
-            ema_decay = net_eval.ema_decay
-            eval_stats = eval_model(model, net_eval, data_loader_fid, device, epoch=epoch, args=args, suffix=f'_ema{ema_decay}')
-            if log_writer is not None and "fid" in eval_stats:
-                logging.info(f"Eval {epoch + 1} epochs finished: FID_ema{ema_decay}: {eval_stats['fid']}")
-                log_writer.add_scalar(f"FID_ema{ema_decay}", eval_stats["fid"], epoch + 1)
+            # Eval coupled model (MSE on prediction):
+            eval_nets = [
+                ("ema", model_without_ddp.net1_ema, model_without_ddp.net2_ema),
+                ("noema", model_without_ddp.net1, model_without_ddp.net2),
+            ]
+            for i, decay in enumerate(model_without_ddp.ema_decays):
+                eval_nets.append((
+                    f"ema{decay}",
+                    model_without_ddp._modules[f"net1_ema{i + 1}"],
+                    model_without_ddp._modules[f"net2_ema{i + 1}"],
+                ))
 
-            # Eval extra ema model:
-            for i in range(len(model_without_ddp.ema_decays)):
-                net_eval = model_without_ddp._modules[f"net_ema{i + 1}"]
-                ema_decay = net_eval.ema_decay
-                eval_stats = eval_model(model, net_eval, data_loader_fid, device, epoch=epoch, args=args, suffix=f'_ema{ema_decay}')
-                if log_writer is not None and "fid" in eval_stats:
-                    logging.info(f"Eval {epoch + 1} epochs finished: FID_ema{ema_decay}: {eval_stats['fid']}")
-                    log_writer.add_scalar(f"FID_ema{ema_decay}", eval_stats["fid"], epoch + 1)
-
-            # Eval no-ema model:
-            net_eval = model_without_ddp.net
-            eval_stats = eval_model(model, net_eval, data_loader_fid, device, epoch=epoch, args=args, suffix='_noema')
-            if log_writer is not None and "fid" in eval_stats:
-                logging.info(f"Eval {epoch + 1} epochs finished: FID w/o ema: {eval_stats['fid']}")
-                log_writer.add_scalar("FID", eval_stats["fid"], epoch + 1)
+            for suffix, net1_eval, net2_eval in eval_nets:
+                mse_total = 0.0
+                n_batches = 0
+                model_without_ddp.eval()
+                with torch.no_grad():
+                    for batch in data_loader_fid:
+                        source_1, source_2, target_1, target_2 = [x.to(device, non_blocking=True) for x in batch]
+                        pred_1, pred_2 = model_without_ddp.sample(source_1, source_2, net1=net1_eval, net2=net2_eval)
+                        mse = ((pred_1 - target_1) ** 2).mean() + ((pred_2 - target_2) ** 2).mean()
+                        mse_total += mse.item()
+                        n_batches += 1
+                        if args.test_run:
+                            break
+                model_without_ddp.train()
+                avg_mse = mse_total / max(n_batches, 1)
+                logging.info(f"Eval epoch {epoch + 1} [{suffix}]: MSE = {avg_mse:.6f}")
+                if log_writer is not None:
+                    log_writer.add_scalar(f"MSE_{suffix}", avg_mse, epoch + 1)
 
         if args.test_run or args.eval_only:
             break
