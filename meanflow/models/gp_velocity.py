@@ -65,15 +65,19 @@ class VectorValuedGP(nn.Module):
         t_s = t.view(B)                 # [B]
         ell_sq = self.length_scale ** 2  # scalar
 
-        # D² = ||z_driver_1 - z_driver_0||² per sample  [B]
-        D_sq = ((z_driver_1 - z_driver_0).flatten(1) ** 2).sum(dim=1)
+        # D² = ||z_driver_1 - z_driver_0||² per sample, normalized by feature
+        # dimension so that ell is independent of spatial resolution.
+        # Without normalization D² ~ C*H*W * O(1), making a = exp(-D²/2ell²) ≈ 0
+        # for any reasonable ell, collapsing the GP to uncorrelated endpoints.
+        d = z_driver_0[0].numel()  # C * H * W
+        D_sq = ((z_driver_1 - z_driver_0).flatten(1) ** 2).sum(dim=1) / d  # [B]
 
         # Because z_driver_t = (1-t)*z_driver_0 + t*z_driver_1,
-        #   ||x* - x_0||² = t²  + ||z_driver_t - z_driver_0||²
+        #   ||x* - x_0||² = t²  + ||z_driver_t - z_driver_0||²  (normalized)
         #                 = t²  + t² * D²  = t²*(1 + D²)
         #   ||x* - x_1||² = (1-t)²*(1 + D²)
         #   ||x_0 - x_1||² =        (1 + D²)
-        one_plus_D = 1.0 + D_sq         # [B]
+        one_plus_D = 1.0 + D_sq         # [B], O(1) after normalization
 
         # Normalized SE kernel values (sigma_f² cancels in posterior mean)
         k0 = torch.exp(-t_s ** 2           * one_plus_D / (2.0 * ell_sq))  # [B]
