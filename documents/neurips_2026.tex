@@ -290,7 +290,8 @@ The detailed training and sampling algorithm are presented in Alg.~\ref{alg:trai
 \section{Empirical Analysis}
 \subsection{Implementation details}
 \textbf{Benchmarks}:  Following the prior practice \citep{sun2025compolunifiedneuraloperator}, we evaluated our method on predicting coupled multi-physics PDEs systems using five benchmarks: 1-D Lotka-Volterra equations \citep{Murray2002} (2 processes), 1-D Belousov-Zhabotinsky equations \citep{Petrov1993} (3 processes), 2-D Gray-
-Scott equations \citep{Pearson_1993} (2 processes) and 2-D Thermal-Hydro-Mechanical problem \citep{Gao2020} (5 processes). The training datasets were stimulated with numerical solvers using 256-point meshes for 1-D cases and $64 \times 64$ meshes for 2-D cases. As prior practice \citep{sun2025compolunifiedneuraloperator}, we also trained the models on two dataset sizes ($512$ and $1024$ samples) and evaluated performance on an independent test set of $200$ samples. Coefficients and boundary
+Scott equations \citep{Pearson_1993} (2 processes), 2-D multiphase flow of oil and water in geological
+storage \citep{bear2010modeling} \citep{hashemi2021pore} \cite{aboukassem2013petroleum} (2 processes), and 2-D Thermal-Hydro-Mechanical problem \citep{Gao2020} (5 processes). The training datasets were stimulated with numerical solvers using 256-point meshes for 1-D cases and $64 \times 64$ meshes for 2-D cases. As prior practice \citep{sun2025compolunifiedneuraloperator}, we also trained the models on two dataset sizes ($512$ and $1024$ samples) and evaluated performance on an independent test set of $200$ samples. Coefficients and boundary
 conditions remained constant to isolate the effects of varying initial conditions.
 
 \textbf{Competing baselines}: We evaluated our proposed method again state-of-the-art neural operators baselines: COMPOL \citep{sun2025compolunifiedneuraloperator}, FNO \citep{li2021fourier}, UFNO \citep{wen2022ufnoenhancedfourier}, Transolver \citep{wu2024transolverfasttransformersolver}, DeepOnet \citep{lu2021learning}, and CMWNO \citep{xiao2023coupled}
@@ -305,9 +306,7 @@ conditions remained constant to isolate the effects of varying initial condition
 \appendix
 
 \section{Technical appendices and supplementary material}
-Technical appendices with additional results, figures, graphs, and proofs may be submitted with the paper submission before the full submission deadline (see above). You can upload a ZIP file for videos or code, but do not upload a separate PDF file for the appendix. There is no page limit for the technical appendices. 
 
-Note: Think of the appendix as ``optional reading'' for reviewers. The paper must be able to stand alone without the appendix; for example, adding critical experiments that support the main claims to an appendix is inappropriate. 
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
