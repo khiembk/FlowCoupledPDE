@@ -36,7 +36,7 @@ def get_args_parser():
 
     parser.add_argument("--start_epoch", default=0, type=int, metavar="N", help="start epoch (used when resumed from checkpoint)")
     parser.add_argument("--eval_only", action="store_true", help="No training, only run evaluation")
-    parser.add_argument("--eval_frequency", default=50, type=int, help="Frequency (in number of epochs) for running FID evaluation. -1 to never run evaluation.")
+    parser.add_argument("--eval_frequency", default=2, type=int, help="Frequency (in number of epochs) for running FID evaluation. -1 to never run evaluation.")
     parser.add_argument("--compute_fid", action="store_true", help="Whether to compute FID in the evaluation loop. When disabled, the evaluation loop still runs and saves snapshots, but skips the FID computation.")
     parser.add_argument("--save_fid_samples", action="store_true", help="Save all samples generated for FID computation.")
     parser.add_argument("--num_workers", default=10, type=int)
@@ -68,6 +68,6 @@ def get_args_parser():
 
     # Debugging settings
     parser.add_argument("--test_run", action="store_true", help="Only run one batch of training and evaluation.")
-    parser.add_argument("--not_compile", action="store_false", dest="compile", default=True, help="Disable compilation.")
+    parser.add_argument("--not_compile", action="store_false", dest="compile", default=False, help="Disable compilation.")
 
     return parser

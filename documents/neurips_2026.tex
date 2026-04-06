@@ -1,0 +1,319 @@
+\documentclass{article}
+
+% if you need to pass options to natbib, use, e.g.:
+%\PassOptionsToPackage{numbers, compress}{natbib}
+% before loading neurips_2026
+
+% The authors should use one of these tracks.
+% Before accepting by the NeurIPS conference, select one of the options below.
+% 0. "default" for submission
+\usepackage[nonatbib]{neurips_2026}
+\usepackage{neurips_2026}
+% the "default" option is equal to the "main" option, which is used for the Main Track with double-blind reviewing.
+% 1. "main" option is used for the Main Track
+%  \usepackage[main]{neurips_2026}
+% 2. "position" option is used for the Position Paper Track
+%  \usepackage[position]{neurips_2026}
+% 3. "eandd" option is used for the Evaluations & Datasets Track
+ % \usepackage[eandd]{neurips_2026}
+ % if you need to opt-in for a single-blind submission in the E&D track:
+ %\usepackage[eandd, nonanonymous]{neurips_2026}
+% 4. "creativeai" option is used for the Creative AI Track
+%  \usepackage[creativeai]{neurips_2026}
+% 5. "sglblindworkshop" option is used for the Workshop with single-blind reviewing
+ % \usepackage[sglblindworkshop]{neurips_2026}
+% 6. "dblblindworkshop" option is used for the Workshop with double-blind reviewing
+%  \usepackage[dblblindworkshop]{neurips_2026}
+
+% After being accepted, the authors should add "final" behind the track to compile a camera-ready version.
+% 1. Main Track
+ % \usepackage[main, final]{neurips_2026}
+% 2. Position Paper Track
+%  \usepackage[position, final]{neurips_2026}
+% 3. Evaluations & Datasets Track
+ % \usepackage[eandd, final]{neurips_2026}
+% 4. Creative AI Track
+%  \usepackage[creativeai, final]{neurips_2026}
+% 5. Workshop with single-blind reviewing
+%  \usepackage[sglblindworkshop, final]{neurips_2026}
+% 6. Workshop with double-blind reviewing
+%  \usepackage[dblblindworkshop, final]{neurips_2026}
+% Note. For the workshop paper template, both \title{} and \workshoptitle{} are required, with the former indicating the paper title shown in the title and the latter indicating the workshop title displayed in the footnote.
+% For workshops (5., 6.), the authors should add the name of the workshop, "\workshoptitle" command is used to set the workshop title.
+% \workshoptitle{WORKSHOP TITLE}
+
+% "preprint" option is used for arXiv or other preprint submissions
+ % \usepackage[preprint]{neurips_2026}
+
+% to avoid loading the natbib package, add option nonatbib:
+\usepackage[nonatbib]{neurips_2026}
+\usepackage{mathtools}
+\usepackage{amssymb}
+\usepackage{natbib} 
+\usepackage{amsmath}
+\usepackage[utf8]{inputenc} % allow utf-8 input
+\usepackage[T1]{fontenc}    % use 8-bit T1 fonts
+\usepackage{hyperref}       % hyperlinks
+\usepackage{url}            % simple URL typesetting
+\usepackage{booktabs}       % professional-quality tables
+\usepackage{amsfonts}       % blackboard math symbols
+\usepackage{nicefrac}       % compact symbols for 1/2, etc.
+\usepackage{microtype}      % microtypography
+\usepackage{xcolor}         % colors
+\usepackage{algorithm} % For algorithm environment
+\usepackage{algorithmic}
+% Note. For the workshop paper template, both \title{} and \workshoptitle{} are required, with the former indicating the paper title shown in the title and the latter indicating the workshop title displayed in the footnote. 
+\title{Flow-based Framework Solving Multiple Processes PDEs}
+
+
+% The \author macro works with any number of authors. There are two commands
+% used to separate the names and addresses of multiple authors: \And and \AND.
+%
+% Using \And between authors leaves it to LaTeX to determine where to break the
+% lines. Using \AND forces a line break at that point. So, if LaTeX puts 3 of 4
+% authors names on the first line, and the last on the second line, try using
+% \AND instead of \And before the third author name.
+
+
+\author{%
+   \\
+  % examples of more authors
+  % \And
+  % Coauthor \\
+  % Affiliation \\
+  % Address \\
+  % \texttt{email} \\
+  % \AND
+  % Coauthor \\
+  % Affiliation \\
+  % Address \\
+  % \texttt{email} \\
+  % \And
+  % Coauthor \\
+  % Affiliation \\
+  % Address \\
+  % \texttt{email} \\
+  % \And
+  % Coauthor \\
+  % Affiliation \\
+  % Address \\
+  % \texttt{email} \\
+}
+
+
+\begin{document}
+
+
+\maketitle
+
+
+\begin{abstract}
+  This paper proposes a novel method for solving multiple processes PDEs using a few-step flow matching with multiple vector fields, which correspond to multiple processes. Each vector field is modeled to depend not only on the corresponding process but also on the other processes, which reflect the interaction between different processes in a complex physics system.
+\end{abstract}
+
+
+
+\section{Introduction}
+[TODO]
+\section{Related Works}
+[TODO]
+\section{Method}
+\subsection{Problem Setting}
+In this section, we provide a simple example of the coupled processes system as well as the multiple processes system. We begin with the coupled processes system with coupled kernels $\kappa_1$ and $\kappa_2$, coupled variable $v_1(x, t)$ and $v_2(x, t)$ given initial condition $v_1(x, 0)$ and $v_2(x, 0)$. Given $\mathcal{U}$ and $\mathcal{A}$ as the initial condition space and the prediction space, let $T$ denote the generic operator such that $T: \mathcal{U} \to \mathcal{A}$. Without the knowledge of how these two variables are coupled, to solve for $v_1(x, \tau)$ and $v_2(x, \tau)$, we need two operator $T_1$ and $T_2$ such that 
+\begin{equation}
+    v_1(x, \tau) = T_1 v_1(x, 0) = \int_{D} \kappa_1\big(x,y, v_1(x,0), v_2(x,0), v_1(y,0), v_2(y,0), \kappa_2\big) v_1(y,0) dy
+\end{equation}
+\begin{equation}
+    v_2(x, \tau) = T_2 v_2(x, 0) = \int_{D} \kappa_2\big(x,y, v_1(x,0), v_2(x,0), v_1(y,0), v_2(y,0), \kappa_1\big) v_2(y,0) dy
+\end{equation}
+where $D \subset \mathbb{R}^{d}$ is a bounded domain. The interacting kernels cannot be directly solved without considering the interference from the other kernel. We can rewrite as 
+\begin{equation}
+    v_1(x, \tau) = T_1 [v_1(x, 0), v_2(x, 0); \kappa_1, \kappa_2] 
+\end{equation}
+\begin{equation}
+    v_2(x, \tau) = T_2 [v_1(x, 0), v_2(x, 0); \kappa_1, \kappa_2] 
+\end{equation}
+Using the above formulations, we can easily extend to the multiple-process system, which includes $n$ different processes, such that, with $i \in [1, n]$, the process $i-$ th can be expressed as: 
+\begin{equation}
+    v_i(x, \tau) = T_i[v_1(x, 0), ...,v_n(x, 0); \kappa_1,..., \kappa_n]
+\end{equation}
+Our idea is to model each process operator $T_i$ by a flow model $\Psi_i$ with average velocity field from $r$ to $t$ as $u^{\theta}_i(z^t_1,..z^t_n; r,t )$, with variable $z^t_i$ as immediate representation of flow $i$-th at time $t \in[0,1]$, such that 
+\begin{equation}
+    z^1_i(x) = v_i(x, 0)
+\end{equation}
+\begin{equation}
+    z^0_i(x) = v_i(x, \tau) 
+\end{equation}
+Then, the ground truth (target) average velocity from $0$ to $1$ with $i-$th process as: 
+\begin{equation}
+    u_i^{\text{tar}}(z^1_1(x),..z^1_n(x); 0,1 ) = v_i(x, 0) -  v_i(x, \tau) \label{eq:global_tar_velocity}
+\end{equation}
+\subsection{Average Velocity with Coupled PDEs Processes}
+\label{sec:average_velocity_couple}
+In this section, we first derive the ground truth average velocity fields in the setting of two processes $v_1(x, t)$ and $v_2(x, t)$ as \citep{geng2025mean}. Let $u^{\text{ins}}_1(z^t_1(x), z^t_2(x), t )$ and $u^{\text{ins}}_2(z^t_1(x), z^t_2(x), t )$ as instant velocity at time $t$, we have the average velocity field from $r$ to $t$ as 
+\begin{equation}
+    (t- r) u_1(z^t_1(x), z^t_2(x), r, t) = \int_{r}^t u^{\text{ins}}_1(z^\tau_1(x), z^\tau_2(x), \tau ) d\tau
+\end{equation}
+Differentiating both sides with respect to $t$, we have:
+\begin{equation}
+    u_1(z^t_1(x), z^t_2(x), r, t) + (t -r) \frac{d}{dt}  u_1(z^t_1(x), z^t_2(x), r, t)= u^{\text{ins}}_1(z^t_1(x), z^t_2(x), t ) \label{eq:def_average_v}
+\end{equation}
+Note that $\frac{dr}{dt} = 0$ and $u^{\text{ins}}_1(z^t_1(x), z^t_2(x), t ) = \frac{d}{dt} (z^t_1(x))$ and $u^{\text{ins}}_2(z^t_1(x), z^t_2(x), t ) = \frac{d}{dt} (z^t_2(x))$, we have the time derivative of average velocity $u_1(z^t_1(x), z^t_2(x), r, t)$ as: 
+\begin{align}
+    \frac{d}{dt}  u_1(z^t_1(x), z^t_2(x), r, t) &=\partial_t u_1(z^t_1(x), z^t_2(x), r, t) \label{eq:time_der_coupled} \\ \nonumber
+    &+ u^{\text{ins}}_1( z^t_1(x), z^t_2(x), t ) \partial_{z_1^t} u_1 (z^t_1(x), z^t_2(x), r, t) \\ \nonumber
+    &+u^{\text{ins}}_2(z^t_1(x), z^t_2(x), t ) \partial_{z_2^t} u_1 (z^t_1(x), z^t_2(x), r, t)
+\end{align}
+Substitution from the equation \ref{eq:time_der_coupled} to the equation \ref{eq:def_average_v}, we then have the form of the ground truth (target) average velocity field as: 
+\begin{equation}
+     u_1^{\text{tar}}(z^t_1(x), z^t_2(x), r, t) = u^{\text{ins}}_1(z^t_1(x), z^t_2(x), t ) - (t -r) \frac{d}{dt}  u_1(z^t_1(x), z^t_2(x), r, t) \label{eq:target_def_average_coupled_velocity}
+\end{equation}
+\subsection{Average Velocity with Multiple PDEs Processes}
+\label{sec:avergae_velocity_multiple}
+In this section, we provide the analysis of the ground truth average velocity field in the setting of multiple processes $v_i(x,t)$ with $i \in [1, n]$. Derive the same step as Section~\ref{sec:average_velocity_couple}, we have the ground truth (target) average velocity field for process $i-$th as: 
+\begin{equation}
+     u_i^{\text{tar}}(z^t_1(x),.., z^t_n(x), r, t) = u^{\text{ins}}_i(z^t_1(x),.., z^t_n(x), t ) - (t -r) \frac{d}{dt}  u_i(z^t_1(x),.., z^t_2(x), r, t) \label{eq:target_def_average_multiple_velocity}
+\end{equation}
+with the time derivative of the average velocity $u_i(z^t_1(x),.., z^t_n(x), r, t)$ as:
+\begin{align}
+    \frac{d}{dt}  u_i(z^t_1(x),..., z^t_n(x), r, t) &=\partial_t u_i(z^t_1(x), ...,z^t_n(x), r, t) \label{eq:time_der_multiple} \\ \nonumber
+    &+ \sum_{j=1}^{n} u^{\text{ins}}_j( z^t_1(x), ...,z^t_n(x), t ) \partial_{z_j^t} u_i (z^t_1(x),..., z^t_n(x), r, t) 
+\end{align}
+
+\subsection{Model Instant Velocity Field using Gaussian Process}
+In Section~\ref{sec:average_velocity_couple} and Section~\ref{sec:avergae_velocity_multiple}, we provided the analysis to compute the ground truth average velocity field in both coupled processes and multiple processes settings. However, we still need to estimate the instant velocity field $u^{\text{ins}}_i$ to compute the target average velocity effectively. In this section, we introduce the framework to compute this instant velocity based on the Gaussian Process~\cite{Rasmussen2006Gaussian} in both coupled processes (Section~\ref{sec:Gaussian_coupled}) and multiple processes settings (Section~\ref{sec:Gaussian_multiple}).
+
+\subsubsection{Coupled PDE setting}
+\label{sec:Gaussian_coupled}
+In this section, we will provide the analysis in the coupled PDEs setting, where there are only two processes $v_1$ and $v_2$ that interact with each other. Formally, we have the dataset that only includes the initial condition $v_i(x,0)$ and status $v_i(x, \tau)$ in time $\tau$. We model the dependence between two random variables $v_1$ and $v_2$ and time $t$ using Gaussian Process, such that, changing the timescale to flow-based $[0, 1]$, we have the $N$ training pairs $\{(0, z^0_1(x)); z^0_2(x)\}$ and $\{(1, z^1_1(x)); z^1_2(x)\}$. The Gaussian process \citep{Rasmussen2006Gaussian} models the joint distribution between any finite number of random variables as a joint Gaussian distribution. We denote $\mathrm{y}$ as $z_2$, $\mathrm{x}$ as vector of  $(t, z_1) \in \mathcal{X} \subset \mathbb{R}^{d+1}$, $\mathrm{y} = f(\mathrm{x}) \in \mathbb{R}^d$, and learn a vector-valued GP~\citep{alvarez2012kernelsvectorvaluedfunctionsreview}, such that:
+\begin{equation}
+   \mathbf{f} \sim \mathcal{GP}(\mathbf{m}, \mathbf{K})
+\end{equation}
+where $\mathbf{m} \in \mathbb{R}^d$ is the mean function and $\mathbf{K}$ is a
+positive matrix valued function that $(\mathbf{K}(\mathrm{x},\mathrm{x}'))_{p,q}$ in the matrix $\mathbf{K}(\mathrm{x}, \mathrm{x}')$ correspond to
+the covariances between the outputs $f_p(\mathrm{x})$ and $f_q(\mathrm{x}')$, which are value of $f(\mathrm{x})$ and $f(\mathrm{x}')$ at dimension $p$ and $q$. For a set of inputs $\mathbf{X}$, the prior distribution over the vector $\mathbf{f}(X)$ is given by 
+\begin{align}
+    \mathbf{f}(X) \sim \mathcal{N}\big(\mathbf{m}(X), \mathbf{K}(X,X) \big)
+\end{align}
+The predictive distribution for new vector $\mathrm{x}_{*}$ is 
+\begin{align}
+    \mathbf{f}(\mathrm{x}_{*}) \mid \mathbf{f}, \mathrm{x}_{*}, X \sim \mathcal{N} \big(\mathbf{f}_{*}(\mathrm{x}_{*}) , \mathbf{K}_{*}(\mathrm{x}_{*}, \mathrm{x}_{*})\big)
+\end{align}
+(\textcolor{red}{Noise-free version, we can modify to noisy observation version based on the experimental results}) with 
+\begin{align}
+    \mathbf{f}_{*}(\mathrm{x}_*) &= \mathbf{K}^{T}_{\mathrm{x}_{*}} \big(\mathbf{K}(X,X) )^{-1} \mathbf{y} \\ 
+    \mathbf{K}_{*}(\mathrm{x}_{*}, \mathrm{x}_{*}) &= \mathbf{K}(\mathrm{x}_{*}, \mathrm{x}_{*}) - \mathbf{K}_{\mathrm{x}_{*}}\big(\mathbf{K}(X,X)\big)^{-1}\mathbf{K}^{T}_{\mathrm{x}_{*}}
+\end{align}
+where $\mathbf{K}_{\mathrm{x}_*} \in \mathbb{R}^{d \times Nd}$ has entries $(\mathbf{K}(\mathrm{x}_{*}, \mathrm{x}_{j}))_{p,q}$ for $j \in [1,N]$ and $p,q \in [1, d]$. Thus, given new input $\mathrm{x}_{*} = (t, z_1)$, we can predict $z_2(\mathrm{x}_{*})$ as 
+\begin{equation}
+    z_2 (\mathrm{x}_*) = \mathbf{f}_{*} (\mathrm{x}_{*}) \label{eq:infer_z}
+\end{equation}
+We can also compute the instant velocity of the random variable $z_2$ at time $t$ as 
+\begin{equation}
+    u^{\text{ins}}_2 (z_2, \mathrm{x}_{*}) = \frac{d}{dt} \Big(  z_2(\mathrm{x}_{*}) \Big) = \frac{d}{dt} \Big(  \mathbf{f}_{*}(\mathrm{x}_{*}) \Big) \label{eq:infer_velocity}
+\end{equation}
+Note that the derivative of a Gaussian process is another Gaussian process~\cite{Rasmussen2006Gaussian}. Thus we can use GPs to make predictions about the instant velocity based on derivative information. Given predefined covariance function $k(\cdot , \cdot)$, we have covariance between function values and
+partial derivatives as
+\begin{align}
+    \text{cov}\Big(\mathbf{f}_*(\mathrm{x_i}), \frac{\partial \mathbf{f}_*(\mathrm{x_j})}{\partial t}\Big) &= \frac{\partial k(\mathrm{x}_i, \mathrm{x}_j)}{\partial t}  \\ \nonumber
+    \text{cov}\Big(\frac{ \partial \mathbf{f}_*(\mathrm{x_i})}{ \partial t}, \frac{\partial \mathbf{f}_*(\mathrm{x_j})}{\partial t}\Big) &= \frac{\partial^2 k(\mathrm{x}_i, \mathrm{x}_j)}{\partial t}
+\end{align}
+For practical implementation, we define the input covariance function as the squared-exponential covariance function as 
+\begin{equation}
+    k(\mathrm{x}_i, \mathrm{x}_j) = \sigma^2_{f} \exp\Big( - \frac{1}{2 \ell^2} \| \mathrm{x}_i - \mathrm{x}_j\|^2_2\Big)
+\end{equation}
+where $\ell$ is the length-scale and $\sigma^2_f$ is the signal variance. To encode the interaction among the output dimensions, we use separable kernels and sum of separable kernels (SOS kernels) \citep{alvarez2012kernelsvectorvaluedfunctionsreview} as the output kernel function, such that 
+\begin{equation}
+    \big(\mathbf{K}(\mathrm{x}_i, \mathrm{x}_j) \big)_{p,q} = k(\mathrm{x}_i, \mathrm{x}_j) k_{T}(p,q)
+\end{equation}
+where $k, k_T$ are scalar kernels on $\mathcal{X} \times \mathcal{X}$ and $\{1,...,n\} \times \{1,..., n \}$. Thus, we have the matrix expression as 
+\begin{align}
+    \mathbf{K}(\mathrm{x}_i, \mathrm{x}_j) &= k(\mathrm{x}_i, \mathrm{x}_j) \mathbf{B} \\
+    \mathbf{K}(X, X) &= \mathbf{B} \otimes k(X,X)
+\end{align}
+where $\mathbf{B}$ is a $d \times d$ symmetric and positive semi-definite matrix, which can be learned via maximizing the log-likelihood~\citep{BonillaMultitaskGauss}.
+So that, given $\mathrm{x}_* =(t, z_1)$ we can sample the value of $z_2(\mathrm{x}_*)$ and also compute the instant velocity $u^{\text{ins}}_2 (z_2, \mathrm{x}_*)$, a lasting bottleneck is how we can sample $(t, z_1)$. Inspired from Dice Strategy~\citep{xiao2023coupled} to randomly decide the interaction order between each process in a physical system in the current layer. We first sample $t \sim U(0,1)$ from a uniform distribution, and we then deploy the dice strategy to randomly decide the interaction order between processes $v_1$ and $v_2$ with a predefined probability $p \in [0,1]$. If $v_1$ interact to $v_2$, we model the value of $z^t_1$ as the linear interpolant of time with a fixed ending point
+\begin{equation}
+    z^t_1 = (1-t)z^0_1 + t z^1_1
+\end{equation}
+Then, we can plug $\mathrm{x}_* =(t, z^t_1)$ into equation~\ref{eq:infer_z} and~\ref{eq:infer_velocity} to compute $z^t_2$ as well as its instant velocity field.
+\subsubsection{Multiple PDE setting}
+\label{sec:Gaussian_multiple}
+In this section, we will provide the analysis of multiple PDE settings, where there are $n$ processes $v_1, ..., v_n$ that interact with each other. To extend the coupled PDE setting to multiple PDE setting, the simple idea is to construct multiple GP mappings: $(t, z_i) \to z_j$ with $i,j \in [1,n]$ and $i \neq j$, and using the Dice Strategy to randomly decide the interaction order between processes. The main bottleneck of this approach is the computational cost, as we have to construct $n!$ GP mappings for $n$ processes. To address this problem, we propose a hybrid approach that combines the linear interpolant and GP mappings randomly in each time period $t$. For instance, we first sample time $t \sim U(0,1)$, then randomly select $\mathcal{A}(t) = \{i_{c},j_c \}^{k(t)}_{c= 1}$ interaction pairs set to construct $k(t)$ GP mappings. The leftover processes are inferred by the linear interpolants of time, such that
+\begin{equation}
+    z^{t}_i = (1-t)z^{0}_i + t z^1_i
+\end{equation}
+\subsection{Model Instant Velocity Field using Berier curve}
+\subsection{Training Algorithm}
+In this section, we provide our training algorithm using the flow-based model to solve coupled PDE and multiple PDE with the average velocity derived in Section~\ref{sec:average_velocity_couple} and Section~\ref{sec:avergae_velocity_multiple}. We first denote $Z(t) = (z^t_1, z^t_2, ..., z^t_n)$ and introduce the global average velocity loss for each process $i$ as 
+\begin{equation}
+    \mathcal{L}^{i}_{\text{global}}(\theta) = \|u^{\theta}_i\big(Z(1), 0,1 \big) - (z^1_i - z^0_i)\|^2_2
+\end{equation}
+We note that the average velocity fields not only need to satisfy the global constraints, but also need to satisfy the local constraints, which are derived from their definitions at each time $t$. Let $u_i^{\text{tar}}(Z(t),r,t)$ be the target average velocity field from Eq.~\ref{eq:target_def_average_coupled_velocity} for coupled PDE setting and Eq.~\ref{eq:target_def_average_multiple_velocity} for multiple PDE setting. We have the local velocity loss for each process $i$ as 
+\begin{equation}
+    \mathcal{L}^{i}_{\text{local}}(\theta, r,t) = \|u^{\theta}_i\big(Z(t), r,t\big) - \text{sg}\big(u_i^{\text{tar}}(Z(t),r,t)\big) \|^2_2
+\end{equation}
+In the local loss function, a stop-gradient (sg) operation is applied on the target average velocity fields $u_i^{\text{tar}}(Z(t),r,t)$ following the common practice~\citep{geng2025mean} to avoid double backpropagation. Given the dataset as $\mathcal{D}$, we have the combined loss function as 
+\begin{equation}
+    \mathcal{L}(\theta,r,t) = \mathbb{E}_{\mathcal{D}}\Big[\sum_{i=1}^n \mathcal{L}^i_{\text{global}}(\theta)\Big] + \lambda \mathbb{E}_{\mathcal{D}}\Big[\sum_{i=1}^n \mathcal{L}^i_{\text{local}}(\theta, r,t)\Big] \label{eq:combined_loss}
+\end{equation}
+The detailed training and sampling algorithm are presented in Alg.~\ref{alg:training} and Alg.~\ref{alg:sampling}. 
+\begin{algorithm}
+\caption{Training Algorithm}
+\label{alg:training}
+\begin{algorithmic}[1]
+\STATE \textbf{Input:} Dataset $\mathcal{D}$, number of epochs $n_0$.
+\STATE \textbf{Output:} The flow model weight $\theta$.
+\FOR{$i = 1$ to $n_0$}
+    \STATE  \texttt{t,r = sample\_t\_r()}
+    \STATE Sample $Z(t) = (z^t_1,...,z^t_n)$ using $\mathcal{GP}$ (Section~\ref{sec:avergae_velocity_multiple}) 
+    \STATE Compute $\mathcal{L}(\theta,r,t)$ as Eq.~\ref{eq:combined_loss}
+    \STATE Update $\theta$ via minimizing $\mathcal{L}(\theta,r,t)$
+\ENDFOR
+\STATE \textbf{Return} the weight $\theta$
+\end{algorithmic}
+\end{algorithm}
+
+\begin{algorithm}
+\caption{One-Step Sampling Algorithm}
+\label{alg:sampling}
+\begin{algorithmic}[1]
+\STATE \textbf{Input:} Test point $Z(1) = (z^1_1, ..., z^1_n)$, pretrained weight $\theta$
+\FOR{$i = 1 $ to $n$}
+   \STATE $z^0_i = z^1_i - u^{\theta}_{i}(Z(1),0,1)$
+\ENDFOR
+\STATE $Z(0) = (z^0_1, ..., z^0_n)$
+\STATE Return $Z(0)$
+\end{algorithmic}
+\end{algorithm}
+
+\section{Empirical Analysis}
+\subsection{Implementation details}
+\textbf{Benchmarks}:  Following the prior practice \citep{sun2025compolunifiedneuraloperator}, we evaluated our method on predicting coupled multi-physics PDEs systems using five benchmarks: 1-D Lotka-Volterra equations \citep{Murray2002} (2 processes), 1-D Belousov-Zhabotinsky equations \citep{Petrov1993} (3 processes), 2-D Gray-
+Scott equations \citep{Pearson_1993} (2 processes) and 2-D Thermal-Hydro-Mechanical problem \citep{Gao2020} (5 processes). The training datasets were stimulated with numerical solvers using 256-point meshes for 1-D cases and $64 \times 64$ meshes for 2-D cases. As prior practice \citep{sun2025compolunifiedneuraloperator}, we also trained the models on two dataset sizes ($512$ and $1024$ samples) and evaluated performance on an independent test set of $200$ samples. Coefficients and boundary
+conditions remained constant to isolate the effects of varying initial conditions.
+
+\textbf{Competing baselines}: We evaluated our proposed method again state-of-the-art neural operators baselines: COMPOL \citep{sun2025compolunifiedneuraloperator}, FNO \citep{li2021fourier}, UFNO \citep{wen2022ufnoenhancedfourier}, Transolver \citep{wu2024transolverfasttransformersolver}, DeepOnet \citep{lu2021learning}, and CMWNO \citep{xiao2023coupled}
+\section{Discussion}
+[TODO]
+\section{Conclusion}
+[TODO]
+
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\newpage
+\appendix
+
+\section{Technical appendices and supplementary material}
+Technical appendices with additional results, figures, graphs, and proofs may be submitted with the paper submission before the full submission deadline (see above). You can upload a ZIP file for videos or code, but do not upload a separate PDF file for the appendix. There is no page limit for the technical appendices. 
+
+Note: Think of the appendix as ``optional reading'' for reviewers. The paper must be able to stand alone without the appendix; for example, adding critical experiments that support the main claims to an appendix is inappropriate. 
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+\newpage
+\input{checklist.tex}
+
+\bibliographystyle{plainnat}
+\bibliography{references}
+\end{document}

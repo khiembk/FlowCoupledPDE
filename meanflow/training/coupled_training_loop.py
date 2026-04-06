@@ -11,6 +11,34 @@ from torch.nn.parallel import DistributedDataParallel
 from torchmetrics.aggregation import MeanMetric
 
 
+@torch.no_grad()
+def evaluate_coupled_rel_l2(model_without_ddp, data_loader, device, net1, net2, args=None):
+    """Compute relative L2 error for both coupled components over a dataloader.
+
+    Returns:
+        (rel_l2, rel_l2_1, rel_l2_2): averaged and per-component relative L2 errors.
+    """
+    model_without_ddp.eval()
+    l2_num_1 = l2_den_1 = 0.0
+    l2_num_2 = l2_den_2 = 0.0
+
+    for batch in data_loader:
+        source_1, source_2, target_1, target_2 = [x.to(device, non_blocking=True) for x in batch]
+        pred_1, pred_2 = model_without_ddp.sample(source_1, source_2, net1=net1, net2=net2)
+        l2_num_1 += ((pred_1 - target_1) ** 2).sum().item()
+        l2_den_1 += (target_1 ** 2).sum().item()
+        l2_num_2 += ((pred_2 - target_2) ** 2).sum().item()
+        l2_den_2 += (target_2 ** 2).sum().item()
+        if args is not None and getattr(args, "test_run", False):
+            break
+
+    model_without_ddp.train()
+    rel_l2_1 = (l2_num_1 / max(l2_den_1, 1e-8)) ** 0.5
+    rel_l2_2 = (l2_num_2 / max(l2_den_2, 1e-8)) ** 0.5
+    rel_l2 = (rel_l2_1 + rel_l2_2) / 2
+    return rel_l2, rel_l2_1, rel_l2_2
+
+
 logger = logging.getLogger(__name__)
 
 

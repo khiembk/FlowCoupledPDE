@@ -17,7 +17,7 @@ from training import distributed_mode
 from training.data_transform import get_transform_cifar, get_transform_mnist
 
 from training.load_and_save import load_model, save_model
-from training.coupled_training_loop import train_coupled_one_epoch, train_combined_loss_step, train_local_loss_step
+from training.coupled_training_loop import train_coupled_one_epoch, train_combined_loss_step, train_local_loss_step, evaluate_coupled_rel_l2
 from torchmetrics.aggregation import MeanMetric
 import models.rng as rng
 
@@ -137,6 +137,22 @@ def main(args):
     data_loader_train = get_data_loader(args, is_for_fid=False)
     data_loader_fid = get_data_loader(args, is_for_fid=True)
 
+    if args.dataset == "grayscott":
+        logger.info("Building Gray-Scott val dataloader for evaluation")
+        _, data_loader_val = build_grayscott_dataloader(
+            data_path=args.data_path,
+            split="val",
+            batch_size=args.batch_size,
+            num_workers=args.num_workers,
+            horizon=1,
+            normalize=False,
+            shuffle=False,
+            drop_last=False,
+        )
+        logger.info(f"Val dataset size: {len(data_loader_val.dataset)}, batches: {len(data_loader_val)}")
+    else:
+        data_loader_val = None
+
     # define the model
     logger.info("Initializing Model")
     model = instantiate_coupled_model(args)
@@ -230,7 +246,10 @@ def main(args):
                 )
                 logging.info(f"Saved checkpoint to {args.output_dir}")
 
-            # Eval coupled model (MSE on prediction):
+            # Eval coupled model (rel-L2 on val split for grayscott, train for others):
+            eval_loader = data_loader_val if data_loader_val is not None else data_loader_fid
+            eval_split = "val" if data_loader_val is not None else "train"
+
             eval_nets = [
                 ("ema", model_without_ddp.net1_ema, model_without_ddp.net2_ema),
                 ("noema", model_without_ddp.net1, model_without_ddp.net2),
@@ -243,26 +262,13 @@ def main(args):
                 ))
 
             for suffix, net1_eval, net2_eval in eval_nets:
-                l2_num_1 = 0.0
-                l2_den_1 = 0.0
-                l2_num_2 = 0.0
-                l2_den_2 = 0.0
-                model_without_ddp.eval()
-                with torch.no_grad():
-                    for batch in data_loader_fid:
-                        source_1, source_2, target_1, target_2 = [x.to(device, non_blocking=True) for x in batch]
-                        pred_1, pred_2 = model_without_ddp.sample(source_1, source_2, net1=net1_eval, net2=net2_eval)
-                        l2_num_1 += ((pred_1 - target_1) ** 2).sum().item()
-                        l2_den_1 += (target_1 ** 2).sum().item()
-                        l2_num_2 += ((pred_2 - target_2) ** 2).sum().item()
-                        l2_den_2 += (target_2 ** 2).sum().item()
-                        if args.test_run:
-                            break
-                model_without_ddp.train()
-                rel_l2_1 = (l2_num_1 / max(l2_den_1, 1e-8)) ** 0.5
-                rel_l2_2 = (l2_num_2 / max(l2_den_2, 1e-8)) ** 0.5
-                rel_l2 = (rel_l2_1 + rel_l2_2) / 2
-                logging.info(f"Eval epoch {epoch + 1} [{suffix}]: rel-L2 = {rel_l2:.6f} (u: {rel_l2_1:.6f}, v: {rel_l2_2:.6f})")
+                rel_l2, rel_l2_1, rel_l2_2 = evaluate_coupled_rel_l2(
+                    model_without_ddp, eval_loader, device, net1_eval, net2_eval, args
+                )
+                logging.info(
+                    f"Eval epoch {epoch + 1} [{suffix}] ({eval_split}): "
+                    f"rel-L2 = {rel_l2:.6f} (u: {rel_l2_1:.6f}, v: {rel_l2_2:.6f})"
+                )
                 if log_writer is not None:
                     log_writer.add_scalar(f"rel_L2_{suffix}", rel_l2, epoch + 1)
                     log_writer.add_scalar(f"rel_L2_u_{suffix}", rel_l2_1, epoch + 1)
