@@ -5,7 +5,7 @@ __pycache__/
 meanflow/output_grayscott/*
 # C extensions
 *.so
-
+meanflow/output_grayscott_gp/*
 # Distribution / packaging
 .Python
 build/
