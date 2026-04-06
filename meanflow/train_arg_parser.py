@@ -66,6 +66,16 @@ def get_args_parser():
     parser.add_argument("--arch", default="unet", type=str, choices=["unet",], help="Architecture to use.")
     parser.add_argument("--use_edm_aug", action="store_true", dest="use_edm_aug", default=False, help="Enable EDM augmentation with augment labels as conditions.")
 
+    # Vector-valued GP + DICE strategy
+    parser.add_argument("--use_gp", action="store_true", default=False,
+                        help="Use vector-valued GP (instead of linear interpolant) for instant velocity, "
+                             "combined with the DICE strategy.")
+    parser.add_argument("--dice_prob", default=0.5, type=float,
+                        help="DICE probability p: chance that process 1 is the linear driver "
+                             "and process 2 is GP-driven (complement uses the opposite order).")
+    parser.add_argument("--gp_log_length_scale", default=0.0, type=float,
+                        help="Initial log length-scale for the GP SE kernel (ell = exp(value)).")
+
     # Debugging settings
     parser.add_argument("--test_run", action="store_true", help="Only run one batch of training and evaluation.")
     parser.add_argument("--not_compile", action="store_false", dest="compile", default=False, help="Disable compilation.")

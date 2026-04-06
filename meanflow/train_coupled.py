@@ -178,12 +178,15 @@ def main(args):
         )
         model_without_ddp = model.module
 
+    opt_params = list(model_without_ddp.net1.parameters()) + list(model_without_ddp.net2.parameters())
+    if getattr(args, "use_gp", False):
+        opt_params += list(model_without_ddp.gp_12.parameters()) + list(model_without_ddp.gp_21.parameters())
     optimizer = torch.optim.Adam(
-    list(model_without_ddp.net1.parameters()) + list(model_without_ddp.net2.parameters()),
-    lr=args.lr,
-    betas=args.optimizer_betas,
-    weight_decay=0.0,
-)
+        opt_params,
+        lr=args.lr,
+        betas=args.optimizer_betas,
+        weight_decay=0.0,
+    )
 
     warmup_iters = args.warmup_epochs * len(data_loader_train)
     warmup_scheduler = torch.optim.lr_scheduler.LinearLR(optimizer, start_factor=1e-8 / args.lr, end_factor=1.0, total_iters=warmup_iters,)
