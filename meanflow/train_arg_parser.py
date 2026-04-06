@@ -32,7 +32,8 @@ def get_args_parser():
     parser.add_argument("--fid_samples", default=50000, type=int, help="number of synthetic samples for FID evaluations")
     parser.add_argument("--device", default="cuda", help="device to use for training / testing")
     parser.add_argument("--seed", default=0, type=int)
-    parser.add_argument("--resume", default="", help="resume from checkpoint")
+    parser.add_argument("--resume", default="", help="resume from checkpoint (path to .pth file)")
+    parser.add_argument("--auto_resume", action="store_true", help="automatically resume from checkpoint-last.pth in output_dir if it exists")
 
     parser.add_argument("--start_epoch", default=0, type=int, metavar="N", help="start epoch (used when resumed from checkpoint)")
     parser.add_argument("--eval_only", action="store_true", help="No training, only run evaluation")

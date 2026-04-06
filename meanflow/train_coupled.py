@@ -196,6 +196,14 @@ def main(args):
     logger.info(f"Optimizer: {optimizer}")
     logger.info(f"Learning-Rate Schedule: {lr_schedule}")
 
+    if getattr(args, "auto_resume", False) and not args.resume:
+        last_ckpt = os.path.join(args.output_dir, "checkpoint-last.pth")
+        if os.path.isfile(last_ckpt):
+            args.resume = last_ckpt
+            logger.info(f"Auto-resuming from {last_ckpt}")
+        else:
+            logger.info("Auto-resume enabled but no checkpoint-last.pth found, starting from scratch.")
+
     load_model(
         args=args,
         model_without_ddp=model_without_ddp,
