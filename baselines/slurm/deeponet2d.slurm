@@ -6,7 +6,7 @@
 #SBATCH --cpus-per-task=4
 #SBATCH --gres=gpu:1
 #SBATCH --mem=16G
-#SBATCH --time=08:00:00
+#SBATCH --time=04:00:00
 #SBATCH --output=%x_%j.out
 #SBATCH --error=%x_%j.err
 
@@ -31,4 +31,5 @@ python train_baseline.py \
     --warmup_epochs 50 \
     --lr 1e-3 \
     --eval_frequency 20 \
-    --log_per_step 10
+    --log_per_step 10 \
+    --auto_resume
