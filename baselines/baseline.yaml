@@ -1,0 +1,25 @@
+name: pde_baselines
+
+# Tested on HPRC cluster (CUDA 12.8 driver, pytorch wheel index cu128)
+# Recreate: conda env create -f baseline.yaml
+# Update:   conda env update -f baseline.yaml --prune
+
+channels:
+  - pytorch      # pytorch-cuda stub (CUDA shared libs)
+  - conda-forge
+  - defaults
+
+dependencies:
+  - python=3.11
+
+  # Conda-managed numerical / system libs
+  - numpy>=1.24
+  - pytorch-cuda=12.4   # pulls in CUDA shared libs from pytorch channel
+
+  - pip
+  - pip:
+    # PyTorch built against CUDA 12.8 — matches cluster GPU driver
+    - --extra-index-url https://download.pytorch.org/whl/cu128
+    - torch==2.8.0
+    # Logging
+    - tensorboard>=2.14
