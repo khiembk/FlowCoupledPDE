@@ -243,9 +243,62 @@ In this section, we will provide the analysis of multiple PDE settings, where th
 \begin{equation}
     z^{t}_i = (1-t)z^{0}_i + t z^1_i
 \end{equation}
-\subsection{Model Instant Velocity Field using Berier curve}
-\subsection{Training Algorithm}
-In this section, we provide our training algorithm using the flow-based model to solve coupled PDE and multiple PDE with the average velocity derived in Section~\ref{sec:average_velocity_couple} and Section~\ref{sec:avergae_velocity_multiple}. We first denote $Z(t) = (z^t_1, z^t_2, ..., z^t_n)$ and introduce the global average velocity loss for each process $i$ as 
+\subsection{Model Instant Velocity Field using Bezier curve}
+Different from $\mathcal{GP}$ above, in this section, we provide another way to model the instant velocity field, which is inspired by the Bezier curve. We first denote the representation of all processes at time $t$ as $Z(t) = (z^t_1, z^t_2, ...,z^t_n )$. We then define the information encoding network, which encodes the information from other processes to process $i-$th as $\phi_i(t, Z(0), Z(1))$. This network received both information about time $t$ and the initial/end presentation point $Z(0), Z(1)$. Therefore, we can define the representation of each process at time $t$ as: 
+\begin{equation}
+    z^t_i = (1-t) z_i^0 + tz^1_i + t(t-1)\phi_i(t, Z(0), Z(1)) \label{eq:bezier_point}
+\end{equation}
+We then have the instant velocity field at time $t$ for each process as 
+\begin{equation}
+    v^t_i = \frac{d}{dt} \Big(z^t_i \Big) = (z^1_i - z^0_i) + (2t -1) \phi_i(t,Z(0),Z(1)) + (t^2 - t) \partial_t \phi_i(t, Z(0), Z(1)) \label{eq:bezier_velocity}
+\end{equation}
+Thus, we can plug Eq.~\ref{eq:bezier_point} and Eq.~\ref{eq:bezier_velocity} into Eq.~\ref{eq:target_def_average_multiple_velocity} to compute the ground truth (target) average velocity field, which is derived from its definition. Following the previous practice~\cite{geng2025mean}, to avoid double backpropagation, we apply a stop-gradient (sg) operator with respect to the flow model parameter $\theta$. We denote the target velocity field as $u^{\text{tar}}_i(Z(t), r, t, \phi)$ and introduce the local velocity loss as 
+\begin{equation}
+    \mathcal{L}^{i}_{\text{local}}(\theta, \phi, r, t) = \|u^{\theta}_i\big(Z(t), r,t\big) - u_i^{\text{tar}}(Z(t), r, t, \phi) \|^2_2 \label{eq:local_loss_bezier}
+\end{equation}
+We then have the updated weight of the flow model by minimizing the local velocity loss with the learning rate $\eta$ as 
+\begin{equation}
+    \Tilde{\theta} = \theta - \eta \nabla_{\theta} \mathcal{L}^{i}_{\text{local}}(\theta, \phi, r,t) \label{eq:update_flow_weight_bezier}
+\end{equation}
+We use the updated weight $\Tilde{\theta}$ to compute the global velocity loss function as 
+\begin{equation}
+    \mathcal{L}^{i}_{\text{global}}(\Tilde{\theta}) = \|u^{\Tilde{\theta}}_i\big(Z(1), 0,1 \big) - (z^1_i - z^0_i)\|^2_2 \label{eq:global_loss_bezier}
+\end{equation}
+Thus, we can update the information encoding weight $\phi$ via minimizing the global velocity loss function with the learning rate $\eta_1$, which can be expressed as
+\begin{equation}
+    \Tilde{\phi} = \phi - \eta_1 \nabla_{\phi} \mathcal{L}^{i}_{\text{global}}(\Tilde{\theta})
+\end{equation}
+where $\nabla_{\phi}\mathcal{L}^{i}_{\text{global}}(\Tilde{\theta})$ can be computed using chain rule as 
+\begin{equation}
+    \nabla_{\phi} \mathcal{L}^{i}_{\text{global}}(\Tilde{\theta}) = \nabla_{\Tilde{\theta}} \mathcal{L}^{i}_{\text{global}}(\Tilde{\theta}) \frac{\partial \Tilde{\theta}}{\partial \phi} = \eta \nabla_{\Tilde{\theta}} \mathcal{L}^{i}_{\text{global}}(\Tilde{\theta}) \partial_{\phi} \Big(\nabla_{\theta} \mathcal{L}^{i}_{\text{local}}(\theta, \phi, r,t) \Big)
+\end{equation}
+In that way, we can update the weight of the information encoding network as 
+\begin{equation}
+    \Tilde{\phi} = \phi - \eta_1\cdot \eta \nabla_{\Tilde{\theta}} \mathcal{L}^{i}_{\text{global}}(\Tilde{\theta}) \partial_{\phi} \Big(\nabla_{\theta} \mathcal{L}^{i}_{\text{local}}(\theta, \phi, r,t) \Big) \label{eq:update_phi}
+\end{equation}
+The detailed training algorithm with Bezier curve modeling as Algorithm~\ref {alg:training_bezier}
+
+\begin{algorithm}
+\caption{Training Algorithm with Bezier curve modeling}
+\label{alg:training_bezier}
+\begin{algorithmic}[1]
+\STATE \textbf{Input:} Dataset $\mathcal{D}$, number of epochs $n_0$.
+\STATE \textbf{Output:} The flow model weight $\theta$.
+\FOR{$i = 1$ to $n_0$}
+    \STATE  \texttt{t,r = sample\_t\_r()}
+    \STATE Sample $Z(t) = (z^t_1,...,z^t_n)$ using equation Eq.~\ref{eq:bezier_point} 
+    \STATE Compute the local velocity loss $\mathcal{L}^{i}_{\text{local}}(\theta, \phi, r, t)$ as Eq.~\ref{eq:local_loss_bezier}
+    \STATE Update flow model loss $\Tilde{\theta}$ with the local loss via Eq.~\ref{eq:update_flow_weight_bezier}
+    \STATE Compute the global velocity loss $\mathcal{L}^{i}_{\text{global}}(\Tilde{\theta})$ as Eq.~\ref{eq:global_loss_bezier}
+    \STATE Update the encoding weight $\Tilde{\phi}$ as Eq.~\ref{eq:update_phi} 
+    \STATE Update flow model weight to minimize $\mathcal{L}^{i}_{\text{global}}(\Tilde{\theta})$
+\ENDFOR
+\STATE \textbf{Return} the flow model weight $\theta$ and encoding weight $\phi$.
+\end{algorithmic}
+\end{algorithm}
+
+\subsection{Training Algorithm with GP modeling}
+In this section, we provide our training algorithm using the flow-based model to solve coupled PDE and multiple PDE with the average velocity derived in Section~\ref{sec:average_velocity_couple} and Section~\ref{sec:avergae_velocity_multiple} and $\mathcal{GP}$ modeling. We first denote $Z(t) = (z^t_1, z^t_2, ..., z^t_n)$ and introduce the global average velocity loss for each process $i$ as 
 \begin{equation}
     \mathcal{L}^{i}_{\text{global}}(\theta) = \|u^{\theta}_i\big(Z(1), 0,1 \big) - (z^1_i - z^0_i)\|^2_2
 \end{equation}
@@ -259,7 +312,7 @@ In the local loss function, a stop-gradient (sg) operation is applied on the tar
 \end{equation}
 The detailed training and sampling algorithm are presented in Alg.~\ref{alg:training} and Alg.~\ref{alg:sampling}. 
 \begin{algorithm}
-\caption{Training Algorithm}
+\caption{Training Algorithm with GP modeling}
 \label{alg:training}
 \begin{algorithmic}[1]
 \STATE \textbf{Input:} Dataset $\mathcal{D}$, number of epochs $n_0$.
@@ -286,7 +339,6 @@ The detailed training and sampling algorithm are presented in Alg.~\ref{alg:trai
 \STATE Return $Z(0)$
 \end{algorithmic}
 \end{algorithm}
-
 \section{Empirical Analysis}
 \subsection{Implementation details}
 \textbf{Benchmarks}:  Following the prior practice \citep{sun2025compolunifiedneuraloperator}, we evaluated our method on predicting coupled multi-physics PDEs systems using five benchmarks: 1-D Lotka-Volterra equations \citep{Murray2002} (2 processes), 1-D Belousov-Zhabotinsky equations \citep{Petrov1993} (3 processes), 2-D Gray-
@@ -294,7 +346,7 @@ Scott equations \citep{Pearson_1993} (2 processes), 2-D multiphase flow of oil a
 storage \citep{bear2010modeling} \citep{hashemi2021pore} \cite{aboukassem2013petroleum} (2 processes), and 2-D Thermal-Hydro-Mechanical problem \citep{Gao2020} (5 processes). The training datasets were stimulated with numerical solvers using 256-point meshes for 1-D cases and $64 \times 64$ meshes for 2-D cases. As prior practice \citep{sun2025compolunifiedneuraloperator}, we also trained the models on two dataset sizes ($512$ and $1024$ samples) and evaluated performance on an independent test set of $200$ samples. Coefficients and boundary
 conditions remained constant to isolate the effects of varying initial conditions.
 
-\textbf{Competing baselines}: We evaluated our proposed method again state-of-the-art neural operators baselines: COMPOL \citep{sun2025compolunifiedneuraloperator}, FNO \citep{li2021fourier}, UFNO \citep{wen2022ufnoenhancedfourier}, Transolver \citep{wu2024transolverfasttransformersolver}, DeepOnet \citep{lu2021learning}, and CMWNO \citep{xiao2023coupled}
+\textbf{Competing baselines}: We evaluated our proposed method again state-of-the-art neural operators baselines: COMPOL \citep{sun2025compolunifiedneuraloperator}, FNO \citep{li2021fourier}, UFNO \citep{wen2022ufnoenhancedfourier}, Transolver \citep{wu2024transolverfasttransformersolver}, DeepOnet \citep{lu2021learning}, and CMWNO \citep{xiao2023coupled}. COMPOL and CMWNO are designed for coupled PDE problems, while other baselines are not inherently designed for multi-physics modeling. Therefore, following the practice~\cite{sun2025compolunifiedneuraloperator}, we adapt them by concatenating process inputs and outputs across their respective channels.
 \section{Discussion}
 [TODO]
 \section{Conclusion}

@@ -10,7 +10,7 @@ torchrun --standalone --nproc_per_node=1 --master_port=12345 \
     --arch=unet \
     --batch_size=32 \
     --lr=0.0006 \
-    --epochs=300 \
+    --epochs=400 \
     --warmup_epochs=100 \
     --eval_frequency=10 \
     --tr_sampler=v1 \
