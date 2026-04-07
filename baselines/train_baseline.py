@@ -132,18 +132,27 @@ def build_model(args) -> nn.Module:
 def build_dataloaders(args):
     """Return (train_loader, val_loader, test_loader) for the selected dataset."""
     if args.dataset == "grayscott":
+        val_ratio = args.val_ratio
+        train_ratio = args.train_ratio
+        # If train+val consumes all data, reuse val as test
+        has_test = (train_ratio + val_ratio) < 1.0
         kw = dict(
             data_path=args.data_path,
             batch_size=args.batch_size,
             num_workers=args.num_workers,
             horizon=1,
             normalize=False,
+            train_ratio=train_ratio,
+            val_ratio=val_ratio,
         )
         _, train_loader = build_grayscott_dataloader(split="train", shuffle=True, **kw)
         _, val_loader = build_grayscott_dataloader(split="val", shuffle=False,
                                                     drop_last=False, **kw)
-        _, test_loader = build_grayscott_dataloader(split="test", shuffle=False,
-                                                     drop_last=False, **kw)
+        if has_test:
+            _, test_loader = build_grayscott_dataloader(split="test", shuffle=False,
+                                                         drop_last=False, **kw)
+        else:
+            test_loader = val_loader
         return train_loader, val_loader, test_loader
     raise NotImplementedError(f"Dataset {args.dataset!r} not supported yet. "
                               "Add a loader in build_dataloaders().")
@@ -280,6 +289,11 @@ def get_args():
     # ── dataset ──────────────────────────────────────────────────────────────
     p.add_argument("--dataset", default="grayscott", choices=["grayscott"])
     p.add_argument("--data_path", required=True)
+    p.add_argument("--train_ratio", type=float, default=0.8,
+                   help="Fraction of trajectories used for training.")
+    p.add_argument("--val_ratio", type=float, default=0.1,
+                   help="Fraction used for validation. Remaining goes to test; "
+                        "if train+val>=1.0 the val set is reused as test.")
     p.add_argument("--n_proc", type=int, default=2,
                    help="Number of coupled processes (channels in the dataset).")
     p.add_argument("--in_channels_per_proc", type=int, default=1)
