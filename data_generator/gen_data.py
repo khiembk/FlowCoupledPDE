@@ -9,15 +9,21 @@ Supported systems:
     gs   Gray-Scott reaction-diffusion  (2 processes, 2-D 64×64)
     lv   Lotka-Volterra predator-prey   (2 processes, 1-D ODE, 256 time-steps)
     bz   Belousov-Zhabotinsky           (3 processes, 1-D 256-pt spatial mesh)
+    mpf  Multiphase Flow (oil-water)    (2 processes, 2-D 64×64)
+    thm  Thermal-Hydro-Mechanical       (5 processes, 2-D 64×64)
 
 Output format per system:
     gs   →  [N_traj, N_env, 2, T, 64,  64]   saved as  gs_<n_samples>.pt
     lv   →  [N_traj, N_env, 2, T]             saved as  lv_<n_samples>.pt
     bz   →  [N_traj, N_env, 3, T, 256]        saved as  bz_<n_samples>.pt
+    mpf  →  [N_traj, N_env, 2, T, 64,  64]   saved as  mpf_<n_samples>.pt
+    thm  →  [N_traj, N_env, 5, T, 64,  64]   saved as  thm_<n_samples>.pt
 
 Usage examples:
-    python gen_data.py --system gs  --n_samples 512  --output_dir ./datasets
-    python gen_data.py --system bz  --n_samples 1024 --output_dir ./datasets --workers 8
+    python gen_data.py --system gs   --n_samples 512  --output_dir ./datasets
+    python gen_data.py --system mpf  --n_samples 512  --output_dir ./datasets
+    python gen_data.py --system thm  --n_samples 512  --output_dir ./datasets
+    python gen_data.py --system bz   --n_samples 1024 --output_dir ./datasets --workers 8
 """
 
 import argparse
@@ -40,7 +46,9 @@ for _p in [str(_DS_DIR), str(_LEADS_DIR)]:
     if _p not in sys.path and Path(_p).exists():
         sys.path.insert(0, _p)
 
-from bz_dataset import BZDataset, default_bz_params   # local
+from bz_dataset import BZDataset, default_bz_params                 # local
+from multiphase_dataset import MultiphaseFlowDataset, default_mpf_params  # local
+from thm_dataset import THMDataset, default_thm_params                    # local
 
 
 # ---------------------------------------------------------------------------
@@ -231,6 +239,125 @@ def generate_bz(n_samples: int, output_dir: Path, workers: int) -> Path:
 
 
 # ---------------------------------------------------------------------------
+# Multiphase Flow (2-D, 64×64, 2 processes: Sw and P)
+# ---------------------------------------------------------------------------
+
+def generate_mpf(n_samples: int, output_dir: Path, workers: int) -> Path:
+    """
+    Generate two-phase (oil-water) flow dataset using IMPES scheme.
+
+    Three environments with different viscosity ratios (μo/μw = 5, 10, 20).
+    Each trajectory has a different random log-normal initial saturation.
+
+    Output shape: [n_traj, n_env, 2, T, 64, 64]
+        channel 0: Sw  (water saturation)
+        channel 1: P   (normalised pore pressure)
+    """
+    n_train, n_val, n_test, total = _split_sizes(n_samples)
+    params = default_mpf_params()   # 3 environments
+    n_env  = len(params)
+    n_traj = _traj_per_env(total, n_env)
+
+    # Time: 10 snapshots at dt_eval = 0.1  (dimensionless time horizon = 1.0)
+    time_horizon = 1.0
+    dt_eval      = 0.1
+    size         = 64
+
+    print(
+        f"[MPF] generating {n_traj} traj × {n_env} envs = {n_traj * n_env} total "
+        f"(need {total}: {n_train} train / {n_val} val / {n_test} test)  "
+        f"grid={size}×{size}, T={int(time_horizon/dt_eval)} snapshots"
+    )
+
+    dataset = MultiphaseFlowDataset(
+        num_traj_per_env=n_traj,
+        size=size,
+        time_horizon=time_horizon,
+        dt_eval=dt_eval,
+        params=params,
+        group="train",
+    )
+
+    loader = DataLoader(dataset, batch_size=1, num_workers=workers, shuffle=False)
+
+    all_states = []
+    for i, sample in enumerate(loader):
+        all_states.append(sample["state"].squeeze(0))   # [2, T, H, W]
+        if (i + 1) % 50 == 0:
+            print(f"  ... {i+1}/{len(dataset)}")
+
+    data = torch.stack(all_states, dim=0)                # [n_traj*n_env, 2, T, H, W]
+    T_steps, H, W = data.shape[2], data.shape[3], data.shape[4]
+    data = data.view(n_traj, n_env, 2, T_steps, H, W)   # [n_traj, n_env, 2, T, 64, 64]
+
+    out_path = output_dir / f"mpf_{n_samples}.pt"
+    torch.save(data, out_path)
+    print(f"[MPF] saved {tuple(data.shape)} → {out_path}")
+    return out_path
+
+
+# ---------------------------------------------------------------------------
+# Thermal-Hydro-Mechanical (2-D, 64×64, 5 processes)
+# ---------------------------------------------------------------------------
+
+def generate_thm(n_samples: int, output_dir: Path, workers: int) -> Path:
+    """
+    Generate Thermal-Hydro-Mechanical dataset using operator splitting.
+
+    Three environments with different material properties (stiffness, permeability).
+    Each trajectory has a different smooth random initial T and p distribution.
+
+    Output shape: [n_traj, n_env, 5, T, 64, 64]
+        channel 0: T   (temperature)
+        channel 1: p   (pore pressure)
+        channel 2: ux  (x-displacement)
+        channel 3: uy  (y-displacement)
+        channel 4: ev  (volumetric strain)
+    """
+    n_train, n_val, n_test, total = _split_sizes(n_samples)
+    params = default_thm_params()   # 3 environments
+    n_env  = len(params)
+    n_traj = _traj_per_env(total, n_env)
+
+    # Time: 10 snapshots at dt_eval = 0.1  (dimensionless time horizon = 1.0)
+    time_horizon = 1.0
+    dt_eval      = 0.1
+    size         = 64
+
+    print(
+        f"[THM] generating {n_traj} traj × {n_env} envs = {n_traj * n_env} total "
+        f"(need {total}: {n_train} train / {n_val} val / {n_test} test)  "
+        f"grid={size}×{size}, T={int(time_horizon/dt_eval)} snapshots"
+    )
+
+    dataset = THMDataset(
+        num_traj_per_env=n_traj,
+        size=size,
+        time_horizon=time_horizon,
+        dt_eval=dt_eval,
+        params=params,
+        group="train",
+    )
+
+    loader = DataLoader(dataset, batch_size=1, num_workers=workers, shuffle=False)
+
+    all_states = []
+    for i, sample in enumerate(loader):
+        all_states.append(sample["state"].squeeze(0))   # [5, T, H, W]
+        if (i + 1) % 50 == 0:
+            print(f"  ... {i+1}/{len(dataset)}")
+
+    data = torch.stack(all_states, dim=0)                # [n_traj*n_env, 5, T, H, W]
+    T_steps, H, W = data.shape[2], data.shape[3], data.shape[4]
+    data = data.view(n_traj, n_env, 5, T_steps, H, W)   # [n_traj, n_env, 5, T, 64, 64]
+
+    out_path = output_dir / f"thm_{n_samples}.pt"
+    torch.save(data, out_path)
+    print(f"[THM] saved {tuple(data.shape)} → {out_path}")
+    return out_path
+
+
+# ---------------------------------------------------------------------------
 # Split info helper — print the ratios to feed to build_grayscott_dataloader
 # ---------------------------------------------------------------------------
 
@@ -252,8 +379,15 @@ def print_split_ratios(n_samples: int):
 
 def parse_args():
     p = argparse.ArgumentParser(description="Generate FlowCoupledPDE benchmark datasets")
-    p.add_argument("--system",     required=True, choices=["gs", "lv", "bz"],
-                   help="Which PDE system to generate")
+    p.add_argument(
+        "--system", required=True,
+        choices=["gs", "lv", "bz", "mpf", "thm"],
+        help=(
+            "PDE system to generate: "
+            "gs=Gray-Scott, lv=Lotka-Volterra, bz=Belousov-Zhabotinsky, "
+            "mpf=Multiphase Flow, thm=Thermal-Hydro-Mechanical"
+        ),
+    )
     p.add_argument("--n_samples",  required=True, type=int, choices=[512, 1024],
                    help="Number of TRAINING trajectories (paper options: 512 or 1024)")
     p.add_argument("--output_dir", default="./datasets",
@@ -268,7 +402,13 @@ def main():
     out_dir = Path(args.output_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    generators = {"gs": generate_gs, "lv": generate_lv, "bz": generate_bz}
+    generators = {
+        "gs":  generate_gs,
+        "lv":  generate_lv,
+        "bz":  generate_bz,
+        "mpf": generate_mpf,
+        "thm": generate_thm,
+    }
     out_path = generators[args.system](args.n_samples, out_dir, args.workers)
 
     print_split_ratios(args.n_samples)
