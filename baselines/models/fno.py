@@ -114,10 +114,12 @@ class FNO2d(nn.Module):
         x = torch.cat([x, self._get_grid(B, H, W, x.device)], dim=-1)  # [B, H, W, C+2]
         x = self.fc0(x).permute(0, 3, 1, 2)           # [B, width, H, W]
 
-        x = F.pad(x, [0, self.padding, 0, self.padding])
+        if self.padding > 0:
+            x = F.pad(x, [0, self.padding, 0, self.padding])
         for blk in self.blocks:
             x = blk(x)
-        x = x[..., :-self.padding, :-self.padding]
+        if self.padding > 0:
+            x = x[..., :-self.padding, :-self.padding]
 
         x = x.permute(0, 2, 3, 1)                     # [B, H, W, width]
         x = F.gelu(self.fc1(x))
