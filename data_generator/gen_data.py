@@ -7,24 +7,27 @@ Generates datasets matching the paper's two experimental options:
 
 Supported systems:
     gs   Gray-Scott reaction-diffusion  (2 processes, 2-D 64×64)
-    lv   Lotka-Volterra predator-prey   (2 processes, 1-D ODE, 256 time-steps)
+    lv   Lotka-Volterra predator-prey   (2 processes, 1-D PDE, 256 spatial pts)
     bz   Belousov-Zhabotinsky           (3 processes, 1-D 256-pt spatial mesh)
     mpf  Multiphase Flow (oil-water)    (2 processes, 2-D 64×64)
     thm  Thermal-Hydro-Mechanical       (5 processes, 2-D 64×64)
 
 Output format per system:
     gs   →  [N_traj, 1,     2, 2,   64,  64]  saved as  gs_<n_samples>.pt
-             (1 env, 2 chan, 2 timesteps=t0+tT)
-    lv   →  [N_traj, N_env, 2, T]             saved as  lv_<n_samples>.pt
+             (1 env, 2 proc, 2 snapshots=t0+tT, 64×64 grid)
+    lv   →  [N_traj, 1,     2, 2,  256]       saved as  lv_<n_samples>.pt
+             (1 env, 2 proc, 2 snapshots=t0+tT, 256-pt spatial mesh)
     bz   →  [N_traj, N_env, 3, T, 256]        saved as  bz_<n_samples>.pt
     mpf  →  [N_traj, N_env, 2, T, 64,  64]   saved as  mpf_<n_samples>.pt
     thm  →  [N_traj, N_env, 5, T, 64,  64]   saved as  thm_<n_samples>.pt
 
-Gray-Scott generation matches COMPOL paper (arXiv:2501.17296) exactly:
-  - Single environment: D_u=0.12, D_v=0.06, F=0.054, k=0.063
-  - 2-D Gaussian Random Field initial conditions (spectral method)
-  - Task: IC at t=0 → final state at t=T=20  (one pair per trajectory)
-  - With dataloader horizon=1, each trajectory yields exactly one IC→final pair.
+Generation matches COMPOL paper (arXiv:2501.17296) settings:
+  GS:  Single env, D_u=0.12, D_v=0.06, F=0.054, k=0.063, T=20
+       2-D GRF IC (spectral), 64×64 grid, IC→final pair per trajectory.
+  LV:  Single env, D_u=D_v=0.01, a=b=c=d=0.01, T=100
+       1-D GRF IC (spectral, l=0.1, σ=1), 256-pt mesh, periodic BCs.
+       IC→final pair per trajectory (matching GS format).
+  MPF: IMPES solver, 3 viscosity environments, 15 timesteps, 64×64 grid.
 
 Usage examples:
     python gen_data.py --system gs   --n_samples 512  --output_dir ./datasets
@@ -221,66 +224,140 @@ def generate_gs(n_samples: int, output_dir: Path, workers: int) -> Path:
 
 
 # ---------------------------------------------------------------------------
-# Lotka-Volterra (1-D ODE, 2 processes, 256 time-steps)
+# Lotka-Volterra helpers — module-level so multiprocessing can pickle them
+# ---------------------------------------------------------------------------
+
+# COMPOL paper parameters (arXiv:2501.17296, Appendix A)
+# "uniform interaction parameters (a=b=c=d=0.01) and uniform diffusion
+#  coefficients (D_u=D_v=0.01)"
+_LV_PARAMS  = {"Du": 0.01, "Dv": 0.01, "a": 0.01, "b": 0.01, "c": 0.01, "d": 0.01}
+_LV_N       = 256          # 256-point spatial mesh (paper: "256-point meshes for 1-D")
+_LV_T_FINAL = 100.0        # physical simulation end time
+_LV_GRF_LS  = 0.1          # GRF correlation length (paper: "length-scale l=0.1")
+_LV_GRF_AMP = 1.0          # GRF amplitude (paper: "amplitude σ=1")
+
+
+def _grf_1d(n: int, length_scale: float, rng: np.random.Generator) -> np.ndarray:
+    """
+    1-D periodic Gaussian Random Field via spectral filtering.
+    Returns a zero-mean, unit-std field of shape (n,).
+    length_scale is a fraction of the Nyquist frequency.
+    """
+    noise_ft = np.fft.rfft(rng.standard_normal(n))
+    k = np.fft.rfftfreq(n)
+    spectral_filter = np.exp(-k ** 2 / (2.0 * length_scale ** 2))
+    field = np.fft.irfft(noise_ft * spectral_filter, n=n)
+    std = field.std()
+    return field / std if std > 1e-10 else field
+
+
+def _lv_rhs(t, uv_flat, n, dx, Du, Dv, a, b, c, d):
+    """
+    1-D reaction-diffusion Lotka-Volterra RHS with periodic BCs.
+        du/dt = Du * ∇²u + a*u - b*u*v
+        dv/dt = Dv * ∇²v + c*u*v - d*v
+    Laplacian via 2nd-order central differences on a periodic domain.
+    """
+    u = uv_flat[:n]
+    v = uv_flat[n:]
+
+    def lap(f):
+        return (np.roll(f, 1) - 2.0 * f + np.roll(f, -1)) / dx ** 2
+
+    dudt = Du * lap(u) + a * u - b * u * v
+    dvdt = Dv * lap(v) + c * u * v - d * v
+    return np.concatenate([dudt, dvdt])
+
+
+def _gen_one_lv(args):
+    """Generate one LV trajectory (IC at t=0, final state at t=T)."""
+    idx, n, Du, Dv, a, b, c, d, T_final, ls, amp = args
+    rng = np.random.default_rng(idx)
+    dx  = 1.0   # unit grid spacing (same convention as GS: dx=1, domain=[0,n))
+    # With D=0.01 and dx=1: D/dx²=0.01 → diffusion is slow, RK45 is not stiff.
+    # GRF at l=0.1 (normalised frequency) → spatial scale ~n*l = 25 grid pts →
+    # τ_diff = (25)²/0.01 = 62500 >> T=100, so spatial patterns are preserved.
+
+    # GRF initial conditions around the equilibrium (u*, v*) = (d/c, a/b)
+    u_eq = d / c    # = 1.0 for a=b=c=d=0.01
+    v_eq = a / b    # = 1.0
+    u0 = np.clip(u_eq + amp * _grf_1d(n, ls, rng), 1e-6, None)
+    v0 = np.clip(v_eq + amp * _grf_1d(n, ls, rng), 1e-6, None)
+    uv0 = np.concatenate([u0, v0])
+
+    res = solve_ivp(
+        _lv_rhs, (0.0, T_final), uv0,
+        method='RK45',           # not stiff with dx=1, D=0.01 → D/dx²=0.01
+        t_eval=[0.0, T_final],
+        args=(n, dx, Du, Dv, a, b, c, d),
+        rtol=1e-5, atol=1e-6,
+    )
+    if not res.success:
+        print(f"  [LV] Warning: traj {idx} failed — {res.message}", flush=True)
+
+    # shape: [n_proc=2, n_time=2, n_spatial=256]
+    return np.stack([
+        np.stack([res.y[:n, 0], res.y[:n, 1]], axis=0),   # u at t=0, t=T
+        np.stack([res.y[n:, 0], res.y[n:, 1]], axis=0),   # v at t=0, t=T
+    ], axis=0).astype(np.float32)   # [2, 2, 256]
+
+
+# ---------------------------------------------------------------------------
+# Lotka-Volterra (1-D reaction-diffusion PDE, 2 processes, 256 spatial pts)
 # ---------------------------------------------------------------------------
 
 def generate_lv(n_samples: int, output_dir: Path, workers: int) -> Path:
-    try:
-        from dataset_generation.lv import LotkaVolterraDataset
-    except ImportError:
-        raise ImportError(
-            "Could not import Lotka-Volterra generator. "
-            "Make sure gray-scott/dynamicalsystems_dataset/ is on sys.path."
-        )
+    """
+    Generate 1-D reaction-diffusion Lotka-Volterra data matching COMPOL paper.
 
+    Paper specs (arXiv:2501.17296, Appendix A):
+      ∂u/∂t = D_u ∇²u + a·u − b·u·v
+      ∂v/∂t = D_v ∇²v + c·u·v − d·v
+      D_u=D_v=0.01,  a=b=c=d=0.01,  single environment (fixed params)
+      1-D GRF IC on 256-point periodic mesh (length-scale=0.1, amplitude=1)
+      Task: IC at t=0 → final solution at t=T=100
+
+    Output shape: [N_traj, 1, 2, 2, 256]
+      (N_traj trajectories, 1 env, 2 processes, 2 snapshots t=0+tT, 256 pts)
+    """
     n_train, n_val, n_test, total = _split_sizes(n_samples)
 
-    params = [
-        {"alpha": 0.5,  "beta": 0.5, "gamma": 0.5,  "delta": 0.5},
-        {"alpha": 0.25, "beta": 0.5, "gamma": 0.5,  "delta": 0.5},
-        {"alpha": 0.75, "beta": 0.5, "gamma": 0.5,  "delta": 0.5},
-        {"alpha": 1.0,  "beta": 0.5, "gamma": 0.5,  "delta": 0.5},
-        {"alpha": 0.5,  "beta": 0.5, "gamma": 0.25, "delta": 0.5},
-        {"alpha": 0.5,  "beta": 0.5, "gamma": 0.75, "delta": 0.5},
-        {"alpha": 1.0,  "beta": 0.5, "gamma": 1.0,  "delta": 0.5},
-        {"alpha": 0.25, "beta": 0.5, "gamma": 0.25, "delta": 0.5},
-        {"alpha": 0.75, "beta": 0.5, "gamma": 0.75, "delta": 0.5},
-        {"alpha": 0.5,  "beta": 0.5, "gamma": 1.0,  "delta": 0.5},
+    Du = _LV_PARAMS['Du'];  Dv = _LV_PARAMS['Dv']
+    a  = _LV_PARAMS['a'];   b  = _LV_PARAMS['b']
+    c  = _LV_PARAMS['c'];   d  = _LV_PARAMS['d']
+
+    print(f"[LV] generating {total} trajectories "
+          f"({n_train} train / {n_val} val / {n_test} test)")
+    print(f"     Du={Du}  Dv={Dv}  a=b=c=d={a}  "
+          f"T={_LV_T_FINAL}  n_spatial={_LV_N}  dx=1.0")
+    print(f"     IC: 1-D GRF (length_scale={_LV_GRF_LS}, amplitude±{_LV_GRF_AMP})")
+
+    job_args = [
+        (i, _LV_N, Du, Dv, a, b, c, d, _LV_T_FINAL, _LV_GRF_LS, _LV_GRF_AMP)
+        for i in range(total)
     ]
-    n_env = len(params)
-    n_traj = _traj_per_env(total, n_env)
 
-    # 256 output time steps as per paper ("256-point meshes for 1-D cases")
-    time_horizon = 128.0   # total physical time
-    dt = time_horizon / 256.0
+    results = []
+    if workers > 1:
+        with Pool(workers) as pool:
+            for i, state in enumerate(pool.imap(_gen_one_lv, job_args, chunksize=4)):
+                results.append(state)
+                if (i + 1) % 100 == 0:
+                    print(f"  ... {i+1}/{total}", flush=True)
+    else:
+        for i, a_arg in enumerate(job_args):
+            results.append(_gen_one_lv(a_arg))
+            if (i + 1) % 100 == 0:
+                print(f"  ... {i+1}/{total}", flush=True)
 
-    print(f"[LV] generating {n_traj} traj × {n_env} envs = {n_traj * n_env} total")
-
-    dataset = LotkaVolterraDataset(
-        num_traj_per_env=n_traj,
-        time_horizon=time_horizon,
-        params=params,
-        dt=dt,
-        method="RK45",
-        group="train",
-    )
-
-    loader = DataLoader(dataset, batch_size=1, num_workers=workers, shuffle=False)
-
-    all_states = []
-    for i, sample in enumerate(loader):
-        # sample['state']: [1, 2, T]
-        all_states.append(sample["state"].squeeze(0))  # [2, T]
-        if (i + 1) % 100 == 0:
-            print(f"  ... {i+1}/{len(dataset)}")
-
-    data = torch.stack(all_states, dim=0)  # [n_traj * n_env, 2, T]
-    T = data.shape[2]
-    data = data.view(n_traj, n_env, 2, T)
+    # [total, 2, 2, 256] → unsqueeze n_env → [total, 1, 2, 2, 256]
+    data = torch.from_numpy(np.stack(results, axis=0)).unsqueeze(1)
 
     out_path = output_dir / f"lv_{n_samples}.pt"
     torch.save(data, out_path)
     print(f"[LV] saved {tuple(data.shape)} → {out_path}")
+    print(f"     split ratios: train={n_train/total:.4f}  val={n_val/total:.4f}  "
+          f"test={(n_test/total):.4f}")
     return out_path
 
 
@@ -346,14 +423,17 @@ def generate_mpf(n_samples: int, output_dir: Path, workers: int) -> Path:
     Output shape: [n_traj, n_env, 2, T, 64, 64]
         channel 0: Sw  (water saturation)
         channel 1: P   (normalised pore pressure)
+
+    T=15 snapshots matches the COMPOL paper ("each simulated for 15 timesteps").
     """
     n_train, n_val, n_test, total = _split_sizes(n_samples)
     params = default_mpf_params()   # 3 environments
     n_env  = len(params)
     n_traj = _traj_per_env(total, n_env)
 
-    # Time: 10 snapshots at dt_eval = 0.1  (dimensionless time horizon = 1.0)
-    time_horizon = 1.0
+    # Time: 15 snapshots at dt_eval = 0.1  (dimensionless time horizon = 1.5)
+    # Paper: "15 timesteps over 7.5×10^6 seconds"
+    time_horizon = 1.5
     dt_eval      = 0.1
     size         = 64
 
