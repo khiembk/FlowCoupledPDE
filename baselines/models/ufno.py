@@ -10,7 +10,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from .fno import SpectralConv2d, SpectralConv1d
+from .fno import SpectralConv2d, SpectralConv1d, FNOBlock2d, FNOBlock1d
 
 
 # ---------------------------------------------------------------------------
@@ -105,8 +105,15 @@ class UFNO2d(nn.Module):
 
         self.fc0 = nn.Linear(in_channels + 2, width)
 
+        # First half: pure FNO blocks (no U-Net path).
+        # Second half: U-FNO blocks (spectral + local U-Net + pointwise).
+        # Mirrors the official architecture: "U-FNO contains N Fourier layers
+        # and N U-Fourier layers" (Wen et al. 2022, Fig. 2).
+        n_fno  = n_layers // 2
+        n_ufno = n_layers - n_fno
         self.blocks = nn.ModuleList(
-            [UFNOBlock2d(width, modes1, modes2) for _ in range(n_layers)]
+            [FNOBlock2d(width, modes1, modes2)  for _ in range(n_fno)] +
+            [UFNOBlock2d(width, modes1, modes2) for _ in range(n_ufno)]
         )
 
         self.fc1 = nn.Linear(width, 128)
@@ -125,10 +132,12 @@ class UFNO2d(nn.Module):
         x = torch.cat([x, self._get_grid(B, H, W, x.device)], dim=-1)
         x = self.fc0(x).permute(0, 3, 1, 2)         # [B, width, H, W]
 
-        x = F.pad(x, [0, self.padding, 0, self.padding])
+        if self.padding > 0:
+            x = F.pad(x, [0, self.padding, 0, self.padding])
         for blk in self.blocks:
             x = blk(x)
-        x = x[..., :-self.padding, :-self.padding]
+        if self.padding > 0:
+            x = x[..., :-self.padding, :-self.padding]
 
         x = x.permute(0, 2, 3, 1)
         x = F.gelu(self.fc1(x))
