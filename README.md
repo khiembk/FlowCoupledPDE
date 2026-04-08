@@ -1,84 +1,124 @@
-# Mean Flows: PyTorch + GPU Implementation
+# FlowCoupledPDE
 
-<div align="center">
-<img width="800" alt="Image" src="https://github.com/user-attachments/assets/2adc06a5-c3bf-41c8-acfa-54c822e7c07b" />
-</div>
+A flow-matching framework for learning coupled PDE systems, with six neural operator baselines for comparison.
 
+## Setup
 
-This is a PyTorch+GPU re-implementation for the CIFAR-10 experiments in [Mean Flows for One-step Generative Modeling](https://arxiv.org/abs/2505.13447). The original experiments were done in JAX+TPU.
-
-## Installation
-
-This repo was tested in PyTorch 2.7.1 and uses `torch.compile`. Compilation may depend on PyTorch versions.
-
-```
+```bash
+# Main method
 conda env create -f environment.yml
-conda activate meanflow
+conda activate pdemeanflow
+
+# Baselines
+conda env create -f baselines/baseline.yaml
+conda activate pde_baselines
 ```
 
-## Demo
+## Data Generation
 
-Run `demo.ipynb` for a demo of 1-step generation and FID evaluation. This demo should produce <2.9 FID.
+Run from repo root. Datasets are saved as `.pt` tensors.
 
-<div align="center">
-<img width="480" alt="Image" src="https://github.com/user-attachments/assets/11966c45-25c6-44e5-ae24-75b29e697b9b" />
-</div>
-
-
-## Training
-
-Run the script `cifar10_v1.sh` to train from scratch with 8 GPUs.
-It is an improved configuration that can approach ~2.9 FID at 16000 epochs (800k iterations with batch 128x8). It takes 0.21s/iter in 8x H200 GPUs. The checkpoint in `demo.ipynb` (~2.80 FID) is from this script.
-
-The original configuration used in the paper is in `cifar10_v0.sh`.
-
-
-## Note on JVP
-
-Users may be unfamiliar with the JVP (Jacobian-vector product) operation, which MeanFlow is based on. While JVP is straightforward to implement in JAX, its correct implementation in PyTorch is worth a closer look.
-
-#### DDP
-
-The op `torch.func.jvp` does not support a DDP (`DistributedDataParallel`) object. In your code, you may need to replace `model` with `model.module` to allow `torch.func.jvp` to run. However, doing so may bypass the gradient synchronization normally handled by DDP, **with no error reported**.
-
-In our code, we handle this by `synchronize_gradients(model)`, with a sanity check `gradient_sanity_check`.
-
-#### Compilation
-
-The memory and speed of JVP can greatly benefit from compilation, in both JAX and PyTorch. In our code, this is done by:
+```bash
+python data_generator/gen_data.py --system gs  --n_samples 512 --output_dir ./datasets
+python data_generator/gen_data.py --system mpf --n_samples 512 --output_dir ./datasets
+python data_generator/gen_data.py --system thm --n_samples 512 --output_dir ./datasets
+python data_generator/gen_data.py --system bz  --n_samples 512 --output_dir ./datasets
 ```
-compiled_train_step = torch.compile(
-    train_step,
-    disable=not args.compile,
-)
+
+Supported systems: `gs` (Gray-Scott, 2D), `lv` (Lotka-Volterra, 1D ODE), `bz` (Belousov-Zhabotinsky, 1D), `mpf` (Multiphase Flow, 2D), `thm` (Thermal-Hydro-Mechanical, 2D, 5 processes).
+
+Paper uses `--n_samples 512` (512 train + 100 val + 200 test trajectories).
+
+## Training: Main Method
+
+Run from `meanflow/`:
+
+```bash
+# Single GPU (local)
+torchrun --standalone --nproc_per_node=1 --master_port=12345 train_coupled.py \
+    --dataset=grayscott \
+    --data_path=<path>/gs_512.pt \
+    --output_dir=<output_dir> \
+    --train_ratio=0.6305 --val_ratio=0.1232 \
+    --arch=unet \
+    --batch_size=32 --lr=0.0006 --epochs=500 --warmup_epochs=100 \
+    --eval_frequency=10 \
+    --tr_sampler=v1 \
+    --P_mean_t=-0.6 --P_std_t=1.6 --P_mean_r=-4.0 --P_std_r=1.6 \
+    --ratio=0.75 --norm_p=0.75 --norm_eps=1e-3 \
+    --dropout=0.2 --ema_decay=0.9999 --ema_decays 0.99995 0.9996 \
+    --use_gp --dice_prob=0.5 --gp_log_length_scale=0.0 \
+    --num_workers=4 --pin_mem --auto_resume
 ```
-where `train_step` is:
+
+Or use the convenience script: `bash scripts/grayscott_gp.sh` (uses `tiny_set` data for quick testing).
+
+**SLURM:**
+```bash
+cd meanflow
+sbatch slurm/gs_gp_512.slurm
 ```
-def train_step(model_without_ddp, *args, **kwargs):
-    loss = model_without_ddp.forward_with_loss(*args, **kwargs)
-    loss.backward(create_graph=False)
-    return loss
+
+Set `PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True` and unset `SLURM_PROCID` when running single-GPU on SLURM (already done in the slurm scripts).
+
+## Training: Baselines
+
+Run from `baselines/`. Six models: `fno2d`, `ufno2d`, `deeponet2d`, `transolver2d`, `cmwno2d`, `compol2d`.
+
+```bash
+python train_baseline.py \
+    --model fno2d \
+    --dataset grayscott \
+    --data_path <path>/gs_512.pt \
+    --output_dir <output_dir> \
+    --n_proc 2 \
+    --modes 12 --width 64 --n_layers 4 --padding 9 \
+    --train_ratio 0.6305 --val_ratio 0.1232 \
+    --batch_size 32 --epochs 500 --warmup_epochs 50 \
+    --lr 1e-3 --eval_frequency 20 --auto_resume
 ```
-Optionally, we also put `update_ema()` into `train_step` for compilation.
 
-#### Alternative to Compilation
+**SLURM (all baselines at once):**
+```bash
+cd baselines
+bash slurm/submit_all.sh          # tiny_set (quick test)
 
-If you don't want to compile (for example, some of your ops are not supported), we recommend to compute `dudt` by `torch.func.jvp` under `torch.no_grad()`:
+# GrayScott-512 individual jobs:
+sbatch slurm/gs512_fno2d.slurm
+sbatch slurm/gs512_ufno2d.slurm
+sbatch slurm/gs512_deeponet2d.slurm
+sbatch slurm/gs512_transolver2d.slurm
+sbatch slurm/gs512_cmwno2d.slurm
+sbatch slurm/gs512_compol2d.slurm
 ```
-u_pred = u_func(z, t, r)
-with torch.no_grad():
-    _, dudt = torch.func.jvp(u_func, (z, t, r), (v, dtdt, drdt))
+
+## Evaluation
+
+```bash
+# From meanflow/
+python eval_coupled.py \
+    --dataset=grayscott \
+    --data_path=<path>/gs_512.pt \
+    --output_dir=<checkpoint_dir> \
+    --train_ratio=0.6305 --val_ratio=0.1232
 ```
-The function prediction `u_pred` is computed separately. In this way, computing `dudt` does not introduce substantial additional memory usage, and its time cost is roughly equivalent to a forward and backward pass. If you want `u_func` to share the dropout masks, consider backing up rng states by `cpu_rng_state = torch.get_rng_state(); cuda_rng_state = torch.cuda.get_rng_state()` and restoring by `torch.set_rng_state(cpu_rng_state); torch.cuda.set_rng_state(cuda_rng_state)` before and after the call of `u_func`.
 
-## References
+Metric: relative L2 error per process and averaged.
 
-This repo is based on the following repos:
+## Repository Structure
 
-* [Flow Matching repo](https://github.com/facebookresearch/flow_matching)
-* [EDM repo](https://github.com/NVlabs/edm)
-
-See also:
-
-* [Our MeanFlow JAX repo](https://github.com/Gsunshine/meanflow) with ImageNet experiments.
-* [A third-party MeanFlow PyTorch repo](https://github.com/zhuyu-cs/MeanFlow) with reproduced ImageNet results.
+```
+meanflow/          # Main method: CoupledFlow training
+  train_coupled.py
+  eval_coupled.py
+  models/          # CoupledFlow, SongUNet, GP velocity, EMA
+  training/        # Training loop, distributed utils, checkpointing
+  data_loaders/
+  scripts/         # Bash convenience scripts
+  slurm/           # SLURM job scripts
+baselines/         # Six neural operator baselines
+  train_baseline.py
+  models/          # fno, ufno, deeponet, transolver, cmwno, compol
+  slurm/
+data_generator/    # PDE data generation (gs, lv, bz, mpf, thm)
+```
