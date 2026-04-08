@@ -263,7 +263,7 @@ def main(args):
 
             # Eval coupled model (rel-L2 on val split for grayscott, train for others):
             eval_loader = data_loader_val if data_loader_val is not None else data_loader_fid
-            eval_split = "val" if data_loader_val is not None else "train"
+            eval_split = "test" if data_loader_val is not None else "train"
 
             eval_nets = [
                 ("ema", model_without_ddp.net1_ema, model_without_ddp.net2_ema),
