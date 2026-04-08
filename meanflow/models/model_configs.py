@@ -27,7 +27,7 @@ MODEL_CONFIGS = {
 }
 
 net1_configs = {
-    "img_resolution": 32,
+    "img_resolution": 64,   # GrayScott spatial resolution is 64×64
     "in_channels": 2,
     "out_channels": 1,
     "channel_mult_noise": 2,
@@ -39,7 +39,7 @@ net1_configs = {
 }
 
 net2_configs = {
-    "img_resolution": 32,
+    "img_resolution": 64,   # GrayScott spatial resolution is 64×64
     "in_channels": 2,
     "out_channels": 1,
     "channel_mult_noise": 2,
