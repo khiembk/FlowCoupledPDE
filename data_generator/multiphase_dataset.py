@@ -263,21 +263,26 @@ class MultiphaseFlowDataset(Dataset):
                    channel 0 = Sw, channel 1 = P (normalised to [0,1])
         """
         Sw  = self._get_init_cond(traj_idx)
-        n   = self.size
         p   = self.params_eq[env]
 
-        # CFL-limited internal sub-step:  dt_cfl = φ * dx / v_max
-        # v_max ≈ q_rate * K_max / φ  (rough upper bound on Darcy velocity)
-        K_max  = self._K[env].max()
-        v_max  = p["q_rate"] * K_max / p["phi"]
-        dt_cfl = max(p["phi"] * self.dx / max(v_max, 1e-6), 1e-6)
+        # Snapshot at t = 0: solve pressure first, then use actual Darcy
+        # velocity to set CFL sub-step (much tighter than K_max/phi estimate).
+        P = self._solve_pressure(Sw, env)
+
+        Sw_c   = np.clip(Sw, 0.0, 1.0)
+        krw    = Sw_c ** p["n_w"];  kro = (1.0 - Sw_c) ** p["n_o"]
+        mob_t  = krw / p["mu_w"] + kro / p["mu_o"] + 1e-30
+        mob_xf = 0.5 * (mob_t[:, :-1] + mob_t[:, 1:])
+        mob_yf = 0.5 * (mob_t[:-1, :] + mob_t[1:, :])
+        vt_x   = np.abs(self._Kx[env] * mob_xf * (P[:, 1:] - P[:, :-1]) / self.dx)
+        vt_y   = np.abs(self._Ky[env] * mob_yf * (P[1:, :] - P[:-1, :]) / self.dx)
+        v_max  = max(float(vt_x.max()), float(vt_y.max()), 1e-6)
+
+        dt_cfl  = p["phi"] * self.dx / v_max
         n_inner = max(1, int(np.ceil(self.dt_eval / dt_cfl)))
         dt_sim  = self.dt_eval / n_inner
 
         Sw_snaps, P_snaps = [], []
-
-        # Snapshot at t = 0
-        P = self._solve_pressure(Sw, env)
         Sw_snaps.append(Sw.copy())
         P_snaps.append(P.copy())
 
