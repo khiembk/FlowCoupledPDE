@@ -18,8 +18,9 @@ cd /home/u.kt348068/khiemtt/FlowCoupledPDE/meanflow
 DATA=/scratch/user/u.kt348068/PDE_data/gs_512.pt
 OUT=/scratch/user/u.kt348068/ckpt/gs_gp_512
 
-torchrun --standalone --nproc_per_node=1 --master_port=12355 \
-    train_coupled.py \
+export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
+
+python train_coupled.py \
     --dataset=grayscott \
     --data_path=$DATA \
     --output_dir=$OUT \
