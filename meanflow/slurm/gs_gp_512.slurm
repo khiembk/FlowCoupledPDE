@@ -19,6 +19,9 @@ DATA=/scratch/user/u.kt348068/PDE_data/gs_512.pt
 OUT=/scratch/user/u.kt348068/ckpt/gs_gp_512
 
 export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
+# Unset SLURM_PROCID so distributed_mode.init_distributed_mode falls
+# through to non-distributed single-GPU mode (avoids NCCL OOM).
+unset SLURM_PROCID
 
 python train_coupled.py \
     --dataset=grayscott \
