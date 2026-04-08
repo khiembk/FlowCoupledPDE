@@ -28,6 +28,7 @@ from torch.utils.tensorboard import SummaryWriter
 # ── project imports ──────────────────────────────────────────────────────────
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "meanflow"))
 from data_loaders.grayscott_loader import build_grayscott_dataloader
+from data_loaders.lv_loader import build_lv_dataloader
 
 from models import (
     FNO1d, FNO2d,
@@ -153,6 +154,28 @@ def build_dataloaders(args):
         if has_test:
             _, test_loader = build_grayscott_dataloader(split="test", shuffle=False,
                                                          drop_last=False, **kw)
+        else:
+            test_loader = val_loader
+        return train_loader, val_loader, test_loader
+    if args.dataset == "lv":
+        val_ratio = args.val_ratio
+        train_ratio = args.train_ratio
+        has_test = (train_ratio + val_ratio) < 1.0
+        kw = dict(
+            data_path=args.data_path,
+            batch_size=args.batch_size,
+            num_workers=args.num_workers,
+            horizon=1,
+            normalize=False,
+            train_ratio=train_ratio,
+            val_ratio=val_ratio,
+        )
+        _, train_loader = build_lv_dataloader(split="train", shuffle=True, **kw)
+        _, val_loader = build_lv_dataloader(split="val", shuffle=False,
+                                             drop_last=False, **kw)
+        if has_test:
+            _, test_loader = build_lv_dataloader(split="test", shuffle=False,
+                                                  drop_last=False, **kw)
         else:
             test_loader = val_loader
         return train_loader, val_loader, test_loader
@@ -287,7 +310,7 @@ def get_args():
     p = argparse.ArgumentParser("Baseline training for coupled PDEs")
 
     # ── dataset ──────────────────────────────────────────────────────────────
-    p.add_argument("--dataset", default="grayscott", choices=["grayscott"])
+    p.add_argument("--dataset", default="grayscott", choices=["grayscott", "lv"])
     p.add_argument("--data_path", required=True)
     p.add_argument("--train_ratio", type=float, default=0.8,
                    help="Fraction of trajectories used for training.")
