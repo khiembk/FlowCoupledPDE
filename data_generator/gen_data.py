@@ -13,11 +13,18 @@ Supported systems:
     thm  Thermal-Hydro-Mechanical       (5 processes, 2-D 64×64)
 
 Output format per system:
-    gs   →  [N_traj, N_env, 2, T, 64,  64]   saved as  gs_<n_samples>.pt
+    gs   →  [N_traj, 1,     2, 2,   64,  64]  saved as  gs_<n_samples>.pt
+             (1 env, 2 chan, 2 timesteps=t0+tT)
     lv   →  [N_traj, N_env, 2, T]             saved as  lv_<n_samples>.pt
     bz   →  [N_traj, N_env, 3, T, 256]        saved as  bz_<n_samples>.pt
     mpf  →  [N_traj, N_env, 2, T, 64,  64]   saved as  mpf_<n_samples>.pt
     thm  →  [N_traj, N_env, 5, T, 64,  64]   saved as  thm_<n_samples>.pt
+
+Gray-Scott generation matches COMPOL paper (arXiv:2501.17296) exactly:
+  - Single environment: D_u=0.12, D_v=0.06, F=0.054, k=0.063
+  - 2-D Gaussian Random Field initial conditions (spectral method)
+  - Task: IC at t=0 → final state at t=T=20  (one pair per trajectory)
+  - With dataloader horizon=1, each trajectory yields exactly one IC→final pair.
 
 Usage examples:
     python gen_data.py --system gs   --n_samples 512  --output_dir ./datasets
@@ -32,6 +39,8 @@ import os
 import torch
 import numpy as np
 from pathlib import Path
+from multiprocessing import Pool
+from scipy.integrate import solve_ivp
 from torch.utils.data import DataLoader
 
 # ---------------------------------------------------------------------------
@@ -66,63 +75,148 @@ def _traj_per_env(total_traj: int, n_env: int) -> int:
 
 
 # ---------------------------------------------------------------------------
+# Gray-Scott helpers — module-level so multiprocessing can pickle them
+# ---------------------------------------------------------------------------
+
+# COMPOL paper parameters (arXiv:2501.17296, Appendix A)
+_GS_PARAMS = {"D_u": 0.12, "D_v": 0.06, "F": 0.054, "k": 0.063}
+_GS_T_FINAL = 20.0   # physical simulation end time (paper: "to time T=20")
+_GS_SIZE    = 64
+_GS_DX      = 1.0
+_GS_GRF_LS  = 0.1    # GRF correlation length (fraction of 1/size)
+_GS_GRF_AMP = 0.25   # perturbation amplitude around u=v=0.5
+
+
+def _grf_2d(size: int, length_scale: float, rng: np.random.Generator) -> np.ndarray:
+    """
+    2-D periodic Gaussian Random Field via spectral filtering.
+    Returns a zero-mean, unit-std field of shape (size, size).
+    length_scale is expressed as a fraction of the Nyquist frequency.
+    """
+    noise_ft = np.fft.rfft2(rng.standard_normal((size, size)))
+    kx = np.fft.fftfreq(size)
+    ky = np.fft.rfftfreq(size)
+    KX, KY = np.meshgrid(kx, ky, indexing='ij')
+    k2 = KX ** 2 + KY ** 2
+    spectral_filter = np.exp(-k2 / (2.0 * length_scale ** 2))
+    field = np.fft.irfft2(noise_ft * spectral_filter, s=(size, size))
+    std = field.std()
+    return field / std if std > 1e-10 else field
+
+
+def _gs_rhs(t, uv_flat, size, dx, Du, Dv, F, k):
+    """Gray-Scott RHS with 9-point isotropic Laplacian and periodic BCs."""
+    N = size * size
+    u = uv_flat[:N].reshape(size, size)
+    v = uv_flat[N:].reshape(size, size)
+
+    def lap(a):
+        nz = np.roll(a,  1, 0);  pz = np.roll(a, -1, 0)
+        zn = np.roll(a,  1, 1);  zp = np.roll(a, -1, 1)
+        nn = np.roll(nz, 1, 1); np_ = np.roll(nz, -1, 1)
+        pn = np.roll(pz, 1, 1);  pp = np.roll(pz, -1, 1)
+        return (-3*a + 0.5*(nz+pz+zn+zp) + 0.25*(nn+np_+pn+pp)) / dx**2
+
+    uvv  = u * v * v
+    dudt = Du * lap(u) - uvv + F * (1.0 - u)
+    dvdt = Dv * lap(v) + uvv - (F + k) * v
+    return np.concatenate([dudt.ravel(), dvdt.ravel()])
+
+
+def _gen_one_gs(args):
+    """Generate one Gray-Scott trajectory (IC at t=0, final state at t=T)."""
+    idx, size, dx, Du, Dv, F, k, T_final, ls, amp = args
+    rng = np.random.default_rng(idx)
+
+    # 2-D GRF initial conditions, clipped to [0, 1]
+    u0 = np.clip(0.5 + amp * _grf_2d(size, ls, rng), 0.0, 1.0)
+    v0 = np.clip(0.5 + amp * _grf_2d(size, ls, rng), 0.0, 1.0)
+    uv0 = np.concatenate([u0.ravel(), v0.ravel()])
+
+    res = solve_ivp(
+        _gs_rhs, (0.0, T_final), uv0,
+        method='RK45', t_eval=[0.0, T_final],
+        args=(size, dx, Du, Dv, F, k),
+        rtol=1e-5, atol=1e-6,
+    )
+    if not res.success:
+        print(f"  [GS] Warning: traj {idx} failed — {res.message}", flush=True)
+
+    N = size * size
+    # shape: [n_chan=2, n_time=2, H, W]  (t=0 and t=T for each species)
+    return np.stack([
+        np.stack([res.y[:N, 0].reshape(size, size),   # u at t=0
+                  res.y[:N, 1].reshape(size, size)],  # u at t=T
+                 axis=0),
+        np.stack([res.y[N:, 0].reshape(size, size),   # v at t=0
+                  res.y[N:, 1].reshape(size, size)],  # v at t=T
+                 axis=0),
+    ], axis=0).astype(np.float32)   # [2, 2, H, W]
+
+
+# ---------------------------------------------------------------------------
 # Gray-Scott (2-D, 64×64, 2 processes)
 # ---------------------------------------------------------------------------
 
 def generate_gs(n_samples: int, output_dir: Path, workers: int) -> Path:
-    try:
-        from dataset_generation.gs import GrayScottReactionDataset
-        from dataset_generation.samplers import SubsetRamdomSampler
-    except ImportError:
-        raise ImportError(
-            "Could not import Gray-Scott generator. "
-            "Make sure gray-scott/dynamicalsystems_dataset/ is on sys.path."
-        )
+    """
+    Generate Gray-Scott data matching COMPOL paper (arXiv:2501.17296):
 
+    Key differences from the old (wrong) generation:
+      OLD: 3 environments with D_u=0.2097/D_v=0.105/different F,k,
+           block-based IC (n_block=3 squares), time_horizon=800/dt_eval=40
+           → 20 time steps, horizon=1 predicts consecutive steps.
+      NEW: single environment D_u=0.12/D_v=0.06/F=0.054/k=0.063 (paper §A),
+           2-D Gaussian Random Field IC (spectral, correlation length 0.1),
+           simulate t=0→T=20, store only (t=0, t=T) per trajectory.
+           With dataloader horizon=1 each traj gives exactly one IC→final pair,
+           matching the paper: "map initial conditions (t=0) to final solution
+           fields (t=T)" with "512 training samples" (one sample = one traj).
+
+    Output shape: [N_traj, 1, 2, 2, 64, 64]
+                   N_traj   — total trajectories (e.g. 812 for n_samples=512)
+                   1        — single environment (fixed PDE params, only IC varies)
+                   2        — species (u, v)
+                   2        — time snapshots (t=0 and t=T)
+                   64, 64   — spatial grid
+    """
     n_train, n_val, n_test, total = _split_sizes(n_samples)
 
-    params = [
-        {"D_u": 0.2097, "D_v": 0.105, "F": 0.037, "k": 0.060},
-        {"D_u": 0.2097, "D_v": 0.105, "F": 0.030, "k": 0.062},
-        {"D_u": 0.2097, "D_v": 0.105, "F": 0.039, "k": 0.058},
+    Du, Dv = _GS_PARAMS['D_u'], _GS_PARAMS['D_v']
+    F,  k  = _GS_PARAMS['F'],   _GS_PARAMS['k']
+
+    print(f"[GS] generating {total} trajectories "
+          f"({n_train} train / {n_val} val / {n_test} test)")
+    print(f"     D_u={Du}  D_v={Dv}  F={F}  k={k}  "
+          f"T={_GS_T_FINAL}  grid={_GS_SIZE}×{_GS_SIZE}  dx={_GS_DX}")
+    print(f"     IC: 2-D GRF  (length_scale={_GS_GRF_LS}, amplitude±{_GS_GRF_AMP})")
+
+    job_args = [
+        (i, _GS_SIZE, _GS_DX, Du, Dv, F, k, _GS_T_FINAL, _GS_GRF_LS, _GS_GRF_AMP)
+        for i in range(total)
     ]
-    n_env = len(params)
-    n_traj = _traj_per_env(total, n_env)
 
-    print(f"[GS] generating {n_traj} traj × {n_env} envs = {n_traj * n_env} total "
-          f"(need {total}: {n_train} train / {n_val} val / {n_test} test)")
+    results = []
+    if workers > 1:
+        with Pool(workers) as pool:
+            for i, state in enumerate(pool.imap(_gen_one_gs, job_args, chunksize=8)):
+                results.append(state)
+                if (i + 1) % 100 == 0:
+                    print(f"  ... {i+1}/{total}", flush=True)
+    else:
+        for i, a in enumerate(job_args):
+            results.append(_gen_one_gs(a))
+            if (i + 1) % 100 == 0:
+                print(f"  ... {i+1}/{total}", flush=True)
 
-    dataset = GrayScottReactionDataset(
-        num_traj_per_env=n_traj,
-        time_horizon=800,
-        params=params,
-        dt_eval=40,
-        method="RK45",
-        group="train",
-        size=64,          # 64×64 as per paper (was 32 in LEADS)
-        dx=1.0,
-        n_block=3,
-        buffer=dict(),
-    )
-
-    loader = DataLoader(dataset, batch_size=1, num_workers=workers, shuffle=False)
-
-    all_states = []   # each item: [2, T, 64, 64]
-    for i, sample in enumerate(loader):
-        all_states.append(sample["state"].squeeze(0))  # [2, T, H, W]
-        if (i + 1) % 50 == 0:
-            print(f"  ... {i+1}/{len(dataset)}")
-
-    # Stack: [n_traj * n_env, 2, T, H, W]
-    data = torch.stack(all_states, dim=0)
-
-    # Reshape to [n_traj, n_env, 2, T, H, W]
-    T, H, W = data.shape[2], data.shape[3], data.shape[4]
-    data = data.view(n_traj, n_env, 2, T, H, W)
+    # [total, 2, 2, H, W] → unsqueeze n_env → [total, 1, 2, 2, H, W]
+    data = torch.from_numpy(np.stack(results, axis=0)).unsqueeze(1)
 
     out_path = output_dir / f"gs_{n_samples}.pt"
     torch.save(data, out_path)
     print(f"[GS] saved {tuple(data.shape)} → {out_path}")
+    print(f"     split ratios: train={n_train/total:.4f}  val={n_val/total:.4f}  "
+          f"test={(n_test/total):.4f}")
     return out_path
 
 
