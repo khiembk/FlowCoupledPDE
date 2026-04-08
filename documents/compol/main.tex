@@ -1,0 +1,91 @@
+\documentclass[twoside,11pt]{article}
+\usepackage{jmlr2e}
+
+
+\usepackage{amsmath,amssymb,mathtools}
+\usepackage{algorithm,algorithmic}
+\usepackage{booktabs}
+\usepackage{wrapfig}
+\usepackage{subcaption}
+\usepackage{bm}
+\usepackage{xspace}
+\usepackage{url}
+\usepackage{cleveref}
+\usepackage{xcolor}
+\usepackage{cancel}
+\usepackage{afterpage}
+\usepackage{multirow}
+
+\DeclareRobustCommand{\ours}{\textsc{COMPOL}\xspace}
+
+\input{emacscomm.tex}
+% \input{formats.sty}
+
+\usepackage{xspace} 
+
+
+
+
+
+\begin{document}
+\firstpageno{1}
+\title{COMPOL: A Unified Neural Operator Framework for Scalable Multi-Physics Simulations}
+
+
+
+\author{
+\name Yifei  Sun\thanks{Equal contribution.} \email yifeisun@umich.edu \\
+\addr School of Information, University of Michigan--Ann Arbor
+\AND
+\name Tao Wang\footnotemark[1] \email tao.wang@utexas.edu \\
+\addr Hildebrand Department of Petroleum and Geosystems Engineering, The University of Texas at Austin
+\AND
+\name Junqi Qu \email junqiqu@cs.fsu.edu \\
+\addr Department of Computer Science, Florida State University
+\AND
+\name Yushun Dong \email yd24f@fsu.edu \\
+\addr Department of Computer Science, Florida State University
+\AND
+\name Hewei Tang \email hewei.tang@austin.utexas.edu \\
+\addr Hildebrand Department of Petroleum and Geosystems Engineering, The University of Texas at Austin
+\AND
+\name Shibo Li\thanks{Corresponding author.} \email shiboli@cs.fsu.edu \\
+\addr Department of Computer Science, Florida State University
+}
+
+
+\begingroup
+\renewcommand\thefootnote{\fnsymbol{footnote}} 
+\maketitle
+\endgroup
+
+\input{sections/abstract}
+\clearpage 
+\input{sections/intro}
+\input{sections/background}
+\input{sections/method}
+\input{sections/related}
+\input{sections/exp}
+\input{sections/conclusion}
+
+\newpage
+
+%\bibliographystyle{plainnat}  % or apalike; JMLR sample uses plainnat
+\bibliography{reference}
+
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+\newpage
+
+\appendix
+
+\input{sections/suppl}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+
+
+
+
+\end{document}

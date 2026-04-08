@@ -1,0 +1,60 @@
+%\vnegxxs
+\section{Background}\label{sect:bk}
+%\vnegxxs
+\paragraph{Operator Learning} Operator learning~\citep{kovachki2023neural} directly approximates solution operators of partial differential equations (PDEs) by learning mappings between infinite-dimensional function spaces. Consider a PDE defined as:
+\[
+	\mathfrak{L}(u)(x) = f(x), x\in\Omega; u(x)=0, x\in\partial\Omega
+\]
+where $\mathfrak{L}$ is a differential operator, $u$ is the solution function, $f$ is the input function, $\Omega$ is the problem domain and $\partial\Omega$ represents its boundary.  Operator learning aims to approximate the inverse operator $\mathfrak{L}^{-1}$ mapping inputs $f$ to $u$ through a parametric operator  $\psi_\theta: \mathcal{H} \rightarrow \mathcal{Y}$. This is achieved by minimizing the empirical risk over a dataset consisting of function pairs $\left\{\left(f_n, u_n\right)\right\}_{n=1}^N$:
+\[
+	\theta^*=\operatorname{argmin}_\theta \frac{1}{N} \sum_{n=1}^N\left\|\psi_\theta\left(f_n\right)-u_n\right\|_{\mathcal{Y}}^2 ,
+\]
+where $\mathcal{H}$ and $\mathcal{Y}$ represent suitable function spaces, such as Banach or Hilbert spaces.
+
+%\vnegxxs
+
+\paragraph{Fourier Neural Operator (FNO)} The Fourier Neural Operator~\citep{li2020fourier} approximates the solution operator using spectral convolutions in the Fourier domain. Given an input function $v(x)$, FNO applies Fourier layers defined by: 
+\[
+	v(x) \leftarrow \sigma\left(W v(x)+\mathcal{F}^{-1}(R(k) \cdot \mathcal{F}(v(x)))\right),
+\]
+where $\Fcal$ and $\Fcal^{-1}$ denote the Fourier transform and inverse Fourier transform, respectively. The spectral kernel $R(k)$ is parameterized as a complex-valued tensor in Fourier space, which is learned during training. Specifically, given $v(x) \in \mathbb{R}^d$, the Fourier transform and its inverse transform are defined as
+$
+\mathcal{F}(v(x))(k)=\int_{\mathbb{R}^d} v(x) e^{-2 \pi i k \cdot x} d x, \mathcal{F}^{-1}(\hat{v}(k))(x)=\int_{\mathbb{R}^d} \hat{v}(k) e^{2 \pi i k \cdot x} d k .
+$
+This spectral approach efficiently captures global correlations within the input function. 
+%\[
+%	\mathcal{F}(v(x))(k)=\int_{\mathbb{R}^d} v(x) e^{-2 \pi i k \cdot x} d x, \mathcal{F}^{-1}(\hat{v}(k))(x)=\int_{\mathbb{R}^d} \hat{v}(k) e^{2 \pi i k \cdot x} d k .
+%\]
+%This spectral approach efficiently captures global correlations within the input function. 
+
+%\paragraph{Multi-Physics Modeling and Simulations} Multi-physics modeling simultaneously simulates multiple interacting physical phenomena governed by coupled PDEs. Such systems commonly appear in fluid-structure interactions, reactive flows, and electro-thermo-mechanical systems. Mathematically, these coupled systems can be described as $\mathfrak{L}_i\left(u_1, u_2, \ldots, u_M\right)=f_i, i=1, \ldots, M$ where operators $\mathfrak{L}_i$ represent possibly nonlinear differential equations with spatial, temporal, and coupling terms. Coupling interactions arise via shared interfaces, boundary conditions, or cross-dependent source terms. These interactions often produce stiff equations and multi-scale dynamics, complicating numerical approaches. Traditional numerical methods include monolithic methods, solving the coupled system simultaneously, offering stability at high computational costs, and partitioned methods, which iteratively solve subsystems, offering computational efficiency but sometimes encountering convergence issues.
+
+
+%\subsection{Recurrent Neural Networks (RNNs)}
+%
+%
+%Recurrent Neural Networks (RNNs)~\citep{elman1990finding, werbos1990backpropagation} are specialized neural architectures designed to process sequential data by maintaining an evolving memory of past information. These networks process sequences $X_T = (x_1, x_2, \cdots, x_T)$ through a hidden state $h_t$ that captures information from all preceding elements $(x_1, x_2, \cdots, x_{t})$. The core mechanism lies in their state update process at each time step: $h_t = \sigma(W_hh_{t-1} + W_xx_t + b)$, where $x_t$ represents the current input, $W_h$ and $W_x$ denote learnable weight matrices, $b$ represents the bias vector, and $\sigma(\cdot)$ serves as a non-linear activation function.
+%While RNNs effectively process sequential data, they face challenges with longer sequences due to vanishing or exploding gradients during training~\cite{bengio1994learning}. This limitation has led to more sophisticated architectures like Long Short-Term Memory (LSTM) networks~\citep{graves2012long} and Gated Recurrent Units (GRUs)~\citep{cho2014learning}, which introduce specialized mechanisms to better control information flow and preserve long-term dependencies. These innovations have established RNNs as powerful tools for sequence modeling applications, particularly in natural language processing and time series prediction.
+%
+%\subsection{Attention Mechanism}
+%
+%
+%The attention mechanism enables models to process relationships between sequence elements in parallel, regardless of their positions~\citep{bahdanau2014neural, graves2014neural, vaswani2017attention}. Given an input sequence $X_T \in \mathbb{R}^{T\times d}$ (where T is sequence length and d is embedding dimension), the mechanism transforms the input into three representations through learned weights:
+%$Q = X W_Q,\quad K = X W_K,\quad V = X W_V$
+%These query (Q), key (K), and value (V) representations feed into the scaled dot-product attention formula:
+%$A = \text{softmax}(\frac{QK^{\top}}{\sqrt{d_k}})$
+%The final output $Z = AV$ provides a refined sequence representation where each position incorporates information from all other positions simultaneously. This parallel processing offers significant efficiency advantages over the sequential computation of traditional RNNs.
+
+$ $
+
+
+
+
+
+
+
+
+
+
+
+
