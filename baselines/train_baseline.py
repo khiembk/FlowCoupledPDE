@@ -336,6 +336,12 @@ def get_args():
     p.add_argument("--weight_decay", type=float, default=0.0)
     p.add_argument("--grad_clip", type=float, default=1.0,
                    help="Max gradient norm (0 = disabled).")
+    p.add_argument("--scheduler", default="cosine", choices=["cosine", "step"],
+                   help="LR scheduler: cosine annealing (default) or step decay.")
+    p.add_argument("--step_size", type=int, default=100,
+                   help="Step scheduler: decay LR every N epochs.")
+    p.add_argument("--step_gamma", type=float, default=0.5,
+                   help="Step scheduler: multiplicative decay factor.")
     p.add_argument("--num_workers", type=int, default=4)
     p.add_argument("--seed", type=int, default=42)
     p.add_argument("--device", default="cuda")
@@ -394,9 +400,15 @@ def main():
         optimizer, start_factor=1e-6 / args.lr, end_factor=1.0,
         total_iters=warmup_iters,
     )
-    main_sched = torch.optim.lr_scheduler.CosineAnnealingLR(
-        optimizer, T_max=total_iters - warmup_iters, eta_min=1e-6,
-    )
+    if args.scheduler == "cosine":
+        main_sched = torch.optim.lr_scheduler.CosineAnnealingLR(
+            optimizer, T_max=total_iters - warmup_iters, eta_min=1e-6,
+        )
+    else:  # step
+        step_size_iters = args.step_size * len(train_loader)
+        main_sched = torch.optim.lr_scheduler.StepLR(
+            optimizer, step_size=step_size_iters, gamma=args.step_gamma,
+        )
     scheduler = torch.optim.lr_scheduler.SequentialLR(
         optimizer, schedulers=[warmup_sched, main_sched], milestones=[warmup_iters]
     )
