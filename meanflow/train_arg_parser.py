@@ -27,6 +27,8 @@ def get_args_parser():
     # Dataset parameters
     parser.add_argument("--dataset", default='cifar10', type=str, help="Dataset to use.")
     parser.add_argument("--data_path", default="./data", type=str, help="data root folder with train, val and test subfolders")
+    parser.add_argument("--train_ratio", default=0.8, type=float, help="Fraction of trajectories for training (grayscott).")
+    parser.add_argument("--val_ratio", default=0.1, type=float, help="Fraction of trajectories for validation (grayscott).")
 
     parser.add_argument("--output_dir", default="./output_dir", help="path where to save, empty for no saving")
     parser.add_argument("--fid_samples", default=50000, type=int, help="number of synthetic samples for FID evaluations")

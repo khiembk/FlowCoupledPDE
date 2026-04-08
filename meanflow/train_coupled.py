@@ -45,12 +45,14 @@ def get_data_loader(args, is_for_fid):
     if args.dataset == "grayscott":
         print("load grayscott...")
         train_set, train_loader = build_grayscott_dataloader(
-        data_path=args.data_path,
-        split="train",
-        batch_size=args.batch_size,
-        num_workers=args.num_workers,
-        horizon=1,
-        normalize=False,
+            data_path=args.data_path,
+            split="train",
+            batch_size=args.batch_size,
+            num_workers=args.num_workers,
+            horizon=1,
+            normalize=False,
+            train_ratio=getattr(args, "train_ratio", 0.8),
+            val_ratio=getattr(args, "val_ratio", 0.1),
         )
         return train_loader
 
@@ -138,18 +140,20 @@ def main(args):
     data_loader_fid = get_data_loader(args, is_for_fid=True)
 
     if args.dataset == "grayscott":
-        logger.info("Building Gray-Scott val dataloader for evaluation")
+        logger.info("Building Gray-Scott test dataloader for evaluation")
         _, data_loader_val = build_grayscott_dataloader(
             data_path=args.data_path,
-            split="val",
+            split="test",
             batch_size=args.batch_size,
             num_workers=args.num_workers,
             horizon=1,
             normalize=False,
             shuffle=False,
             drop_last=False,
+            train_ratio=getattr(args, "train_ratio", 0.8),
+            val_ratio=getattr(args, "val_ratio", 0.1),
         )
-        logger.info(f"Val dataset size: {len(data_loader_val.dataset)}, batches: {len(data_loader_val)}")
+        logger.info(f"Test dataset size: {len(data_loader_val.dataset)}, batches: {len(data_loader_val)}")
     else:
         data_loader_val = None
 
