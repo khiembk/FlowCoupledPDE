@@ -287,6 +287,7 @@ class SongUNet(torch.nn.Module):
         encoder_type        = 'standard',   # Encoder architecture: 'standard' for DDPM++, 'residual' for NCSN++.
         decoder_type        = 'standard',   # Decoder architecture: 'standard' for both DDPM++ and NCSN++.
         resample_filter     = [1,1],        # Resampling filter: [1,1] for DDPM++, [1,3,3,1] for NCSN++.
+        use_checkpoint      = False,        # Gradient checkpointing to trade compute for activation memory.
     ):
         assert embedding_type in ['fourier', 'positional']
         assert encoder_type in ['standard', 'skip', 'residual']
@@ -294,6 +295,7 @@ class SongUNet(torch.nn.Module):
 
         super().__init__()
         self.label_dropout = label_dropout
+        self.use_checkpoint = use_checkpoint
         emb_channels = model_channels * channel_mult_emb
         noise_channels = model_channels * channel_mult_noise
         init = dict(init_mode='xavier_uniform')
@@ -395,7 +397,10 @@ class SongUNet(torch.nn.Module):
             elif 'aux_residual' in name:
                 x = skips[-1] = aux = (x + block(aux)) / np.sqrt(2)
             else:
-                x = block(x, emb) if isinstance(block, UNetBlock) else block(x)
+                if self.use_checkpoint and isinstance(block, UNetBlock):
+                    x = torch.utils.checkpoint.checkpoint(block, x, emb, use_reentrant=False)
+                else:
+                    x = block(x, emb) if isinstance(block, UNetBlock) else block(x)
                 skips.append(x)
 
         # Decoder.
@@ -412,7 +417,10 @@ class SongUNet(torch.nn.Module):
             else:
                 if x.shape[1] != block.in_channels:
                     x = torch.cat([x, skips.pop()], dim=1)
-                x = block(x, emb)
+                if self.use_checkpoint and isinstance(block, UNetBlock):
+                    x = torch.utils.checkpoint.checkpoint(block, x, emb, use_reentrant=False)
+                else:
+                    x = block(x, emb)
         return aux
 
 #----------------------------------------------------------------------------

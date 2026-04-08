@@ -90,11 +90,16 @@ def get_compiled_counts():
     return len(metrics)
 
 
-def train_combined_loss_step(model_without_ddp, *args, **kwargs):
-    
-    loss = model_without_ddp.forward_combined_loss(*args, **kwargs)
-    loss.backward(create_graph=False)
-    return loss
+def train_combined_loss_step(model_without_ddp, source_1, source_2, target_1, target_2, aug_cond=None):
+    # Backprop local and global losses separately so their activation graphs
+    # are never both live simultaneously (halves peak activation memory).
+    local_loss = model_without_ddp.forward_local_loss(source_1, source_2, target_1, target_2)
+    local_loss.backward()
+
+    global_loss = model_without_ddp.forward_global_loss(source_1, source_2, target_1, target_2)
+    global_loss.backward()
+
+    return (local_loss + global_loss).detach()
 
 def train_local_loss_step(model_without_ddp, *args, **kwargs):
     

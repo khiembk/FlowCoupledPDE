@@ -28,7 +28,7 @@ python train_coupled.py \
     --train_ratio=0.6305 \
     --val_ratio=0.1232 \
     --arch=unet \
-    --batch_size=4 \
+    --batch_size=32 \
     --lr=0.0006 \
     --epochs=2 \
     --warmup_epochs=1 \

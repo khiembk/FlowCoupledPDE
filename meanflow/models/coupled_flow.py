@@ -147,22 +147,26 @@ class CoupledFlow(nn.Module):
         dtdt = torch.ones_like(t_b)
         drdt = torch.zeros_like(r_b)
 
-        if which == 1:
-            def u_func(z1, z2, t, r):
-                return self._u1(z1, z2, t, r, net=self.net1)
-            u_pred = u_func(zt_1, zt_2, t_b, r_b)
-        else:
-            def u_func(z1, z2, t, r):
-                return self._u2(z1, z2, t, r, net=self.net2)
-            u_pred = u_func(zt_1, zt_2, t_b, r_b)
+        net = self.net1 if which == 1 else self.net2
+        u_fn = self._u1 if which == 1 else self._u2
 
-       
+        def u_func(z1, z2, t, r):
+            return u_fn(z1, z2, t, r, net=net)
+
+        u_pred = u_func(zt_1, zt_2, t_b, r_b)
+
+        # torch.utils.checkpoint does not implement a JVP rule, so disable it
+        # temporarily for the JVP pass (no activations need saving here anyway
+        # since the result is detached before entering the loss graph).
+        old_ckpt = getattr(net, 'use_checkpoint', False)
+        net.use_checkpoint = False
         with torch.no_grad():
             _, dudt = torch.func.jvp(
                 u_func,
                 (zt_1, zt_2, t_b, r_b),
                 (v1,   v2,   dtdt, drdt),
             )
+        net.use_checkpoint = old_ckpt
 
         v_target = v1 if which == 1 else v2
         u_tgt = v_target - (t_b - r_b) * dudt

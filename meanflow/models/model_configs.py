@@ -36,6 +36,7 @@ net1_configs = {
     "encoder_type": "standard",
     "decoder_type": "standard",
     "dropout": 0.2,
+    "use_checkpoint": True, # gradient checkpointing: trade ~30% compute for ~5x activation memory reduction
 }
 
 net2_configs = {
@@ -48,6 +49,7 @@ net2_configs = {
     "encoder_type": "standard",
     "decoder_type": "standard",
     "dropout": 0.2,
+    "use_checkpoint": True, # gradient checkpointing: trade ~30% compute for ~5x activation memory reduction
 }
 
 
