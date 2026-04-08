@@ -20,14 +20,14 @@ python train_baseline.py \
     --model deeponet2d \
     --dataset grayscott \
     --data_path $DATA \
-    --output_dir ./output/grayscott_deeponet2d \
+    --output_dir /scratch/user/u.kt348068/ckpt/grayscott_deeponet2d \
     --n_proc 2 \
     --width 64 \
     --deeponet_p 128 \
     --train_ratio 0.8 \
     --val_ratio 0.2 \
     --batch_size 32 \
-    --epochs 400 \
+    --epochs 2000 \
     --warmup_epochs 50 \
     --lr 1e-3 \
     --eval_frequency 20 \

@@ -20,7 +20,7 @@ python train_baseline.py \
     --model fno2d \
     --dataset grayscott \
     --data_path $DATA \
-    --output_dir ./output/grayscott_fno2d \
+    --output_dir /scratch/user/u.kt348068/ckpt/grayscott_fno2d \
     --n_proc 2 \
     --modes 12 \
     --width 64 \
@@ -29,7 +29,7 @@ python train_baseline.py \
     --train_ratio 0.8 \
     --val_ratio 0.2 \
     --batch_size 32 \
-    --epochs 400 \
+    --epochs 500 \
     --warmup_epochs 50 \
     --lr 1e-3 \
     --eval_frequency 20 \

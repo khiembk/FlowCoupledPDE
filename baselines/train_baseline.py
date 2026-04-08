@@ -256,9 +256,7 @@ def save_checkpoint(model, optimizer, scheduler, epoch, args):
         "epoch": epoch,
         "args": vars(args),
     }
-    path = os.path.join(args.output_dir, f"checkpoint-{epoch:04d}.pth")
-    torch.save(ckpt, path)
-    # Keep a "last" symlink for easy resuming
+    # Only keep the last checkpoint for resuming (avoids disk bloat)
     last_path = os.path.join(args.output_dir, "checkpoint-last.pth")
     torch.save(ckpt, last_path)
 
