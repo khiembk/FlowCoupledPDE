@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-#SBATCH --job-name=gs512_compol2d_atn
+#SBATCH --job-name=gs512_compol2d_rnn
 #SBATCH --partition=gpu
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
@@ -20,7 +20,7 @@ python train_baseline.py \
     --model compol2d \
     --dataset grayscott \
     --data_path $DATA \
-    --output_dir /scratch/user/u.kt348068/ckpt/gs512_compol2d_atn \
+    --output_dir /scratch/user/u.kt348068/ckpt/gs512_compol2d_rnn \
     --n_proc 2 \
     --modes 12 \
     --width 32 \
@@ -35,5 +35,5 @@ python train_baseline.py \
     --lr 1e-3 \
     --eval_frequency 20 \
     --log_per_step 50 \
-    --aggr_type atn \
+    --aggr_type rnn \
     --auto_resume

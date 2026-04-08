@@ -115,12 +115,14 @@ def build_model(args) -> nn.Module:
             modes1=args.modes, modes2=args.modes,
             width=args.width, n_layers=args.n_layers,
             n_heads=args.n_heads, padding=args.padding,
+            aggr_type=args.aggr_type,
         )
     if name == "compol1d":
         return COMPOL1d(
             in_channels=c_in, out_channels=c_out, n_proc=n,
             modes=args.modes, width=args.width,
             n_layers=args.n_layers, n_heads=args.n_heads,
+            aggr_type=args.aggr_type,
         )
     raise ValueError(f"Unknown model: {args.model}")
 
@@ -327,6 +329,9 @@ def get_args():
     # CMWNO-specific
     p.add_argument("--wavelet_k", type=int, default=2,
                    help="Wavelet filter size k (must be power of 2) for CMWNO.")
+    # COMPOL-specific
+    p.add_argument("--aggr_type", type=str, default="atn", choices=["atn", "rnn"],
+                   help="Aggregation type for COMPOL: 'atn' (ATN) or 'rnn' (RNN).")
 
     # ── training ─────────────────────────────────────────────────────────────
     p.add_argument("--batch_size", type=int, default=32)
