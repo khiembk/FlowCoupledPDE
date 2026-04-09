@@ -18,7 +18,7 @@ from training import distributed_mode
 from training.data_transform import get_transform_cifar, get_transform_mnist
 
 from training.load_and_save import load_model, save_model
-from training.coupled_training_loop import train_coupled_one_epoch, train_combined_loss_step, train_local_loss_step, evaluate_coupled_rel_l2
+from training.coupled_training_loop import train_coupled_one_epoch, train_combined_loss_step, train_combine_loss_squence_step, train_local_loss_step, evaluate_coupled_rel_l2
 from torchmetrics.aggregation import MeanMetric
 import models.rng as rng
 
@@ -243,8 +243,9 @@ def main(args):
         lr_schedule=lr_schedule,
     )
 
+    _train_step_fn = train_combine_loss_squence_step if args.seq_loss else train_combined_loss_step
     compiled_train_step = torch.compile(
-        train_combined_loss_step,
+        _train_step_fn,
         disable=not args.compile,
     )
 

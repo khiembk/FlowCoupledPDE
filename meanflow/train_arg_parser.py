@@ -82,5 +82,8 @@ def get_args_parser():
     # Debugging settings
     parser.add_argument("--test_run", action="store_true", help="Only run one batch of training and evaluation.")
     parser.add_argument("--not_compile", action="store_false", dest="compile", default=False, help="Disable compilation.")
+    parser.add_argument("--seq_loss", action="store_true",
+                        help="Minimize local and global losses sequentially (two separate backward passes) "
+                             "instead of jointly (one backward on their sum).")
 
     return parser

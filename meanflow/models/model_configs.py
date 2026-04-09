@@ -47,7 +47,7 @@ COUPLED_CONFIGS = {
         "channel_mult": [2, 2, 2],
         "encoder_type": "standard",
         "decoder_type": "standard",
-        "use_checkpoint": True,     # gradient checkpointing
+        "use_checkpoint": False,
     },
     "unet1d": {
         "seq_len":            256,  # LV sequence length
