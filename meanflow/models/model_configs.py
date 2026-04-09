@@ -8,12 +8,26 @@ import torch.nn as nn
 from models.meanflow import MeanFlow
 from models.coupled_flow import CoupledFlow
 from models.unet import SongUNet
+from models.unet1d import SongUNet1d
 
 MODEL_ARCHS = {
-    "unet": SongUNet,
+    "unet":   SongUNet,
+    "unet1d": SongUNet1d,
 }
 
 MODEL_CONFIGS = {
+    "unet1d": {
+        "seq_len":            256,
+        "in_channels":        2,
+        "out_channels":       1,
+        "model_channels":     64,
+        "channel_mult":       (1, 2, 2, 2),
+        "num_blocks":         2,
+        "attn_resolutions":   (32,),
+        "dropout":            0.1,
+        "channel_mult_noise": 2,
+        "embedding_type":     "positional",
+    },
     "unet": {
         "img_resolution": 32,
         "in_channels": 3,
@@ -76,11 +90,20 @@ def instantiate_coupled_model(args) -> nn.Module:
         architechture in MODEL_CONFIGS
     ), f"Model architecture {architechture} is missing its config."
 
-    
     arch = MODEL_ARCHS[architechture]
-    if args.use_edm_aug:
-        net1_configs['augment_dim'] = 6
-        net2_configs['augment_dim'] = 6
-    model = CoupledFlow(arch=arch, net1_configs= net1_configs, net2_configs= net2_configs, args=args)
 
+    if architechture == "unet1d":
+        import copy
+        cfg = copy.deepcopy(MODEL_CONFIGS["unet1d"])
+        cfg["dropout"] = args.dropout
+        n1_configs = cfg
+        n2_configs = copy.deepcopy(cfg)
+    else:
+        if args.use_edm_aug:
+            net1_configs['augment_dim'] = 6
+            net2_configs['augment_dim'] = 6
+        n1_configs = net1_configs
+        n2_configs = net2_configs
+
+    model = CoupledFlow(arch=arch, net1_configs=n1_configs, net2_configs=n2_configs, args=args)
     return model

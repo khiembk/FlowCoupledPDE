@@ -7,6 +7,7 @@ from pathlib import Path
 
 from functools import partial
 from data_loaders.grayscott_loader import GrayScottCoupledDataset, build_grayscott_dataloader
+from data_loaders.lv_loader import build_lv_dataloader
 import numpy as np
 import torch
 import torch.backends.cudnn as cudnn
@@ -51,6 +52,19 @@ def get_data_loader(args, is_for_fid):
             num_workers=args.num_workers,
             horizon=1,
             normalize=False,
+            train_ratio=getattr(args, "train_ratio", 0.8),
+            val_ratio=getattr(args, "val_ratio", 0.1),
+        )
+        return train_loader
+
+    if args.dataset == "lv":
+        print("load Lotka-Volterra...")
+        _, train_loader = build_lv_dataloader(
+            data_path=args.data_path,
+            split="train",
+            batch_size=args.batch_size,
+            num_workers=args.num_workers,
+            horizon=1,
             train_ratio=getattr(args, "train_ratio", 0.8),
             val_ratio=getattr(args, "val_ratio", 0.1),
         )
@@ -148,6 +162,20 @@ def main(args):
             num_workers=args.num_workers,
             horizon=1,
             normalize=False,
+            shuffle=False,
+            drop_last=False,
+            train_ratio=getattr(args, "train_ratio", 0.8),
+            val_ratio=getattr(args, "val_ratio", 0.1),
+        )
+        logger.info(f"Test dataset size: {len(data_loader_val.dataset)}, batches: {len(data_loader_val)}")
+    elif args.dataset == "lv":
+        logger.info("Building Lotka-Volterra test dataloader for evaluation")
+        _, data_loader_val = build_lv_dataloader(
+            data_path=args.data_path,
+            split="test",
+            batch_size=args.batch_size,
+            num_workers=args.num_workers,
+            horizon=1,
             shuffle=False,
             drop_last=False,
             train_ratio=getattr(args, "train_ratio", 0.8),
