@@ -179,6 +179,29 @@ def build_dataloaders(args):
         else:
             test_loader = val_loader
         return train_loader, val_loader, test_loader
+    if args.dataset == "multiphase":
+        # MPF has the same tensor format as GrayScott: [N_traj, N_env, 2, T, H, W]
+        val_ratio = args.val_ratio
+        train_ratio = args.train_ratio
+        has_test = (train_ratio + val_ratio) < 1.0
+        kw = dict(
+            data_path=args.data_path,
+            batch_size=args.batch_size,
+            num_workers=args.num_workers,
+            horizon=1,
+            normalize=False,
+            train_ratio=train_ratio,
+            val_ratio=val_ratio,
+        )
+        _, train_loader = build_grayscott_dataloader(split="train", shuffle=True, **kw)
+        _, val_loader   = build_grayscott_dataloader(split="val",   shuffle=False,
+                                                     drop_last=False, **kw)
+        if has_test:
+            _, test_loader = build_grayscott_dataloader(split="test", shuffle=False,
+                                                         drop_last=False, **kw)
+        else:
+            test_loader = val_loader
+        return train_loader, val_loader, test_loader
     raise NotImplementedError(f"Dataset {args.dataset!r} not supported yet. "
                               "Add a loader in build_dataloaders().")
 
@@ -310,7 +333,7 @@ def get_args():
     p = argparse.ArgumentParser("Baseline training for coupled PDEs")
 
     # ── dataset ──────────────────────────────────────────────────────────────
-    p.add_argument("--dataset", default="grayscott", choices=["grayscott", "lv"])
+    p.add_argument("--dataset", default="grayscott", choices=["grayscott", "lv", "multiphase"])
     p.add_argument("--data_path", required=True)
     p.add_argument("--train_ratio", type=float, default=0.8,
                    help="Fraction of trajectories used for training.")

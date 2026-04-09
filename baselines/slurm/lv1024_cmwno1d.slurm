@@ -1,26 +1,26 @@
 #!/usr/bin/env bash
-#SBATCH --job-name=gs1024_cmwno2d
+#SBATCH --job-name=lv1024_cmwno1d
 #SBATCH --partition=gpu
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=4
 #SBATCH --gres=gpu:1
 #SBATCH --mem=16G
-#SBATCH --time=01:00:00
+#SBATCH --time=00:30:00
 #SBATCH --output=%x_%j.out
 #SBATCH --error=%x_%j.err
 
 source /sw/eb/sw/Miniconda3/23.10.0-1/etc/profile.d/conda.sh
 conda activate pde_baselines
 
-DATA=/scratch/user/u.kt348068/PDE_data/gs_1024.pt
+DATA=/scratch/user/u.kt348068/PDE_data/lv_1024.pt
 cd /home/u.kt348068/khiemtt/FlowCoupledPDE/baselines
 
 python train_baseline.py \
-    --model cmwno2d \
-    --dataset grayscott \
+    --model cmwno1d \
+    --dataset lv \
     --data_path $DATA \
-    --output_dir /scratch/user/u.kt348068/ckpt/gs1024_cmwno2d \
+    --output_dir /scratch/user/u.kt348068/ckpt/lv1024_cmwno1d \
     --n_proc 2 \
     --width 32 \
     --n_layers 4 \
