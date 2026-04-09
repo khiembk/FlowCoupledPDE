@@ -52,4 +52,5 @@ python train_coupled.py \
     --gp_log_length_scale=0.0 \
     --num_workers=4 \
     --pin_mem \
+    --seq_loss \
     --auto_resume
