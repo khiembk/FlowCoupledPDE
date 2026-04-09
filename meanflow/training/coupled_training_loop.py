@@ -91,6 +91,11 @@ def get_compiled_counts():
 
 
 def train_combined_loss_step(model_without_ddp, source_1, source_2, target_1, target_2, aug_cond=None):
+    loss = model_without_ddp.forward_combined_loss(source_1, source_2, target_1, target_2)
+    loss.backward()
+    return loss.detach()
+
+def train_combine_loss_squence_step(model_without_ddp, source_1, source_2, target_1, target_2, aug_cond=None):
     # Backprop local and global losses separately so their activation graphs
     # are never both live simultaneously (halves peak activation memory).
     local_loss = model_without_ddp.forward_local_loss(source_1, source_2, target_1, target_2)
