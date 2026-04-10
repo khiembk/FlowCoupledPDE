@@ -1,212 +1,259 @@
 """
-Belousov-Zhabotinsky (BZ) reaction dataset generator.
+Belousov-Zhabotinsky (BZ) dataset — paper-faithful implementation.
 
-Implements the 3-variable Oregonator model on a 1-D spatial domain with
-periodic boundary conditions.  The three coupled fields are:
+Reference: COMPOL paper (arXiv:2501.17296), Appendix A
 
-    u  ~  [HBrO2]  (activator / bromous acid)
-    v  ~  [Ce4+]   (oxidised catalyst)
-    w  ~  [Br-]    (inhibitor / bromide)
+Equations:
+    ∂u/∂t = ε₁ ∇²u  +  u + v - uv - u²
+    ∂v/∂t = ε₂ ∇²v  +  w - v - uv
+    ∂w/∂t = ε₃ ∇²w  +  u - w
 
-Dimensionless Tyson-Fife form (Tyson & Fife, 1980):
+Parameters: ε₁ = ε₂ = 0.01,  ε₃ = 0.005,  t ∈ [0, 0.5]
+Domain:     [0, 1], periodic BC
+Solver:     ETDRK4 (pseudo-spectral, Cox & Matthews 2002)
+Resolution: 1024 points (fine grid) → subsampled to 256 (dataset)
+IC:         Independent 1D GRFs per channel, Gaussian kernel, l = 0.03
 
-    ε  * ∂u/∂t = u(1-u) - w*(u-q)/(u+q)   +  D_u * ∂²u/∂x²
-       * ∂v/∂t = u  -  v                    +  D_v * ∂²v/∂x²
-    δ  * ∂w/∂t = u  -  w                    +  D_w * ∂²w/∂x²
+Output per trajectory: [3, T, 256]
+    channel 0: u
+    channel 1: v
+    channel 2: w
 
-The format of the saved tensor mirrors the Gray-Scott convention used in this
-repo:  [N_traj, N_env, 3, T, N_x]
-
-References
-----------
-Tyson & Fife (1980) "Target patterns in a realistic model of the
-    Belousov-Zhabotinsky reaction", J. Chem. Phys. 73, 2224.
-Petrov et al. (1993) "Controlling chaos in the BZ reaction", Nature 361, 240.
+Output tensor format: [N_traj, 1, 3, T, 256]   (N_env = 1)
 """
 
 import numpy as np
 import torch
 from torch.utils.data import Dataset
-from scipy.integrate import solve_ivp
-from functools import partial
 
 
 class BZDataset(Dataset):
     """
-    Generates 1-D Belousov-Zhabotinsky trajectories on the fly (buffered).
+    Generates BZ trajectories via ETDRK4 pseudo-spectral method.
 
-    Each sample is a single trajectory of shape [3, T, N_x]:
-        channel 0 : u field
-        channel 1 : v field
-        channel 2 : w field
+    Simulates on N_FINE=1024 points, subsamples to N_COARSE=256.
+    IC: independent 1D GRF per channel with Gaussian kernel (l=0.03).
 
     Args:
-        num_traj_per_env: number of distinct initial conditions per environment
-        n_points:  spatial resolution (number of grid points), default 256
-        time_horizon: total integration time
-        dt_eval:   time between saved snapshots
-        params:    list of dicts with keys {eps, delta, q, D_u, D_v, D_w}
-        method:    ODE solver, default 'RK45'
-        group:     'train' or 'test' (controls RNG seed offset)
+        num_traj:    number of trajectories
+        dt:          ETDRK4 internal step size (default 5e-4 is stable)
+        n_snapshots: number of saved output frames in (0, T_END]
+        group:       'train' or 'test' (controls RNG seed offset)
     """
+
+    EPS1 = 0.01
+    EPS2 = 0.01
+    EPS3 = 0.005
+    T_END = 0.5
+    N_FINE = 1024
+    N_COARSE = 256
+    GRF_L = 0.03          # GRF correlation length
 
     def __init__(
         self,
-        num_traj_per_env: int,
-        n_points: int,
-        time_horizon: float,
-        dt_eval: float,
-        params: list,
-        method: str = "RK45",
+        num_traj: int,
+        dt: float = 5e-4,
+        n_snapshots: int = 20,
         group: str = "train",
     ):
         super().__init__()
-        self.num_traj_per_env = num_traj_per_env
-        self.num_env = len(params)
-        self.len = num_traj_per_env * self.num_env
-        self.n_points = n_points
-        self.time_horizon = float(time_horizon)
-        self.dt_eval = dt_eval
-        self.n_steps = int(time_horizon / dt_eval)
-        self.params_eq = params
-        self.method = method
-        self.test = group == "test"
-        self.max_seed = np.iinfo(np.int32).max
-        self.buffer = {}
-        self.indices = [
-            list(range(e * num_traj_per_env, (e + 1) * num_traj_per_env))
-            for e in range(self.num_env)
-        ]
-        # finite-difference Laplacian matrix (periodic BC, 2nd order)
-        self._L = self._build_laplacian(n_points, dx=100.0 / n_points)
+        self.num_traj    = num_traj
+        self.dt          = dt
+        self.n_snapshots = n_snapshots
+        self.is_test     = (group == "test")
+        self.max_seed    = np.iinfo(np.int32).max
+        self.buffer      = {}
+
+        n = self.N_FINE
+        # Wavenumbers for [0,1] periodic domain: k = 2π·n·freq
+        freq = np.fft.rfftfreq(n, d=1.0 / n)   # [0, 1, 2, ..., n/2]
+        k    = 2 * np.pi * freq                  # physical wavenumbers
+        self._k2 = k ** 2                        # k² for Laplacian
+
+        # Subsampling stride
+        self._stride = self.N_FINE // self.N_COARSE
+
+        # Pre-compute ETDRK4 coefficients (reused every step)
+        self._cu = self._precompute(self.EPS1, dt)
+        self._cv = self._precompute(self.EPS2, dt)
+        self._cw = self._precompute(self.EPS3, dt)
+
+        # Steps between consecutive saved snapshots
+        dt_snap = self.T_END / self.n_snapshots
+        self._steps_per_snap = max(1, round(dt_snap / dt))
 
     # ------------------------------------------------------------------
-    # Spatial operators
+    # ETDRK4 pre-computation
+    # ------------------------------------------------------------------
+
+    def _precompute(self, eps: float, h: float) -> dict:
+        """
+        Compute ETDRK4 coefficients for linear operator c = -eps * k².
+        Handles c = 0 (k = 0 mode) via Taylor series.
+        Returns dict with arrays of shape [N_FINE//2 + 1].
+        """
+        c  = -eps * self._k2           # ≤ 0
+        ch = c * h
+        ch2 = c * (h / 2.0)
+
+        E  = np.exp(ch)
+        E2 = np.exp(ch2)
+
+        # phi(x) = (exp(x) - 1) / x,  lim_{x→0} = 1
+        # phi_h  = h * phi(ch)  → h as ch→0
+        # phi_h2 = (h/2) * phi(ch2) → h/2 as ch→0
+        def phi(x, scale):
+            small = np.abs(x) < 1e-8
+            safe_x = np.where(small, 1e-8, x)
+            val = scale * (np.exp(x) - 1.0) / safe_x
+            return np.where(small, scale * np.ones_like(x), val)
+
+        phi_h  = phi(ch,  h)
+        phi_h2 = phi(ch2, h / 2.0)
+
+        # Cox-Matthews final-step weights (all approach h/6, h/3, h/6 as ch→0)
+        small = np.abs(ch) < 1e-6
+        ch2_s = np.where(small, 1e-6, ch) ** 2   # avoid /0
+
+        f1 = np.where(small, h / 6.0,
+                      h * (-4 - ch + E * (4 - 3*ch + ch**2)) / ch2_s)
+        f2 = np.where(small, h / 3.0,
+                      h * 2 * (2 + ch + E * (-2 + ch)) / ch2_s)
+        f3 = np.where(small, h / 6.0,
+                      h * (-4 - 3*ch - ch**2 + E * (4 - ch)) / ch2_s)
+
+        return dict(E=E, E2=E2, phi_h=phi_h, phi_h2=phi_h2, f1=f1, f2=f2, f3=f3)
+
+    # ------------------------------------------------------------------
+    # Reaction (nonlinear) terms
     # ------------------------------------------------------------------
 
     @staticmethod
-    def _build_laplacian(n: int, dx: float) -> np.ndarray:
-        """Circulant finite-difference Laplacian for periodic BC."""
-        diag = -2.0 * np.ones(n)
-        off = np.ones(n - 1)
-        L = np.diag(diag) + np.diag(off, 1) + np.diag(off, -1)
-        L[0, -1] = 1.0
-        L[-1, 0] = 1.0
-        return L / (dx ** 2)
+    def _Nu(u, v, w): return  u + v - u * v - u ** 2
+    @staticmethod
+    def _Nv(u, v, w): return  w - v - u * v
+    @staticmethod
+    def _Nw(u, v, w): return  u - w
 
     # ------------------------------------------------------------------
-    # ODE right-hand side
+    # One ETDRK4 step (pseudo-spectral)
     # ------------------------------------------------------------------
 
-    def _rhs(self, t: float, state: np.ndarray, env: int) -> np.ndarray:
-        eps = self.params_eq[env]["eps"]
-        delta = self.params_eq[env]["delta"]
-        q = self.params_eq[env]["q"]
-        D_u = self.params_eq[env]["D_u"]
-        D_v = self.params_eq[env]["D_v"]
-        D_w = self.params_eq[env]["D_w"]
-        L = self._L
+    def _step(self, u, v, w):
+        n   = self.N_FINE
+        cu, cv, cw = self._cu, self._cv, self._cw
+        rfft  = np.fft.rfft
+        irfft = np.fft.irfft
 
-        n = self.n_points
-        u = state[0:n]
-        v = state[n:2 * n]
-        w = state[2 * n:3 * n]
+        def to_k(x):    return rfft(x)
+        def to_x(x, c): return irfft(x, n=n)  # noqa – c unused but documents intent
 
-        # Oregonator kinetics + diffusion
-        denom = np.clip(u + q, 1e-10, None)
-        du = (1.0 / eps) * (u * (1.0 - u) - w * (u - q) / denom) + D_u * (L @ u)
-        dv = (u - v) + D_v * (L @ v)
-        dw = (1.0 / delta) * (u - w) + D_w * (L @ w)
+        # Stage 1 — evaluate N at current state
+        Nu1 = rfft(self._Nu(u, v, w))
+        Nv1 = rfft(self._Nv(u, v, w))
+        Nw1 = rfft(self._Nw(u, v, w))
 
-        return np.concatenate([du, dv, dw])
+        uh = rfft(u); vh = rfft(v); wh = rfft(w)
+
+        # Stage 2 — half-step using N1
+        au = irfft(cu["E2"] * uh + cu["phi_h2"] * Nu1, n=n)
+        av = irfft(cv["E2"] * vh + cv["phi_h2"] * Nv1, n=n)
+        aw = irfft(cw["E2"] * wh + cw["phi_h2"] * Nw1, n=n)
+
+        Nu2 = rfft(self._Nu(au, av, aw))
+        Nv2 = rfft(self._Nv(au, av, aw))
+        Nw2 = rfft(self._Nw(au, av, aw))
+
+        # Stage 3 — half-step using N2
+        bu = irfft(cu["E2"] * uh + cu["phi_h2"] * Nu2, n=n)
+        bv = irfft(cv["E2"] * vh + cv["phi_h2"] * Nv2, n=n)
+        bw = irfft(cw["E2"] * wh + cw["phi_h2"] * Nw2, n=n)
+
+        Nu3 = rfft(self._Nu(bu, bv, bw))
+        Nv3 = rfft(self._Nv(bu, bv, bw))
+        Nw3 = rfft(self._Nw(bu, bv, bw))
+
+        # Stage 4 — full-step using 2·N3 - N1 (starting from half-step a)
+        auh = rfft(au); avh = rfft(av); awh = rfft(aw)
+        cu_ = irfft(cu["E2"] * auh + cu["phi_h2"] * (2 * Nu3 - Nu1), n=n)
+        cv_ = irfft(cv["E2"] * avh + cv["phi_h2"] * (2 * Nv3 - Nv1), n=n)
+        cw_ = irfft(cw["E2"] * awh + cw["phi_h2"] * (2 * Nw3 - Nw1), n=n)
+
+        Nu4 = rfft(self._Nu(cu_, cv_, cw_))
+        Nv4 = rfft(self._Nv(cu_, cv_, cw_))
+        Nw4 = rfft(self._Nw(cu_, cv_, cw_))
+
+        # Final Cox-Matthews combination
+        u_new = irfft(cu["E"] * uh + cu["f1"] * Nu1 + cu["f2"] * (Nu2 + Nu3) + cu["f3"] * Nu4, n=n)
+        v_new = irfft(cv["E"] * vh + cv["f1"] * Nv1 + cv["f2"] * (Nv2 + Nv3) + cv["f3"] * Nv4, n=n)
+        w_new = irfft(cw["E"] * wh + cw["f1"] * Nw1 + cw["f2"] * (Nw2 + Nw3) + cw["f3"] * Nw4, n=n)
+
+        return u_new, v_new, w_new
 
     # ------------------------------------------------------------------
-    # Initial conditions
+    # GRF initial condition
     # ------------------------------------------------------------------
 
-    def _get_init_cond(self, traj_index: int) -> np.ndarray:
-        seed = traj_index if not self.test else self.max_seed - traj_index
-        rng = np.random.default_rng(seed)
-        n = self.n_points
+    def _grf(self, rng: np.random.Generator) -> np.ndarray:
+        """
+        Sample one 1D GRF on [0,1] periodic with Gaussian kernel, l=0.03.
+        Returns array of shape [N_FINE], zero-mean.
+        """
+        n = self.N_FINE
+        freq = np.fft.rfftfreq(n, d=1.0 / n)
+        k    = 2 * np.pi * freq
+        S    = np.exp(-0.5 * (k * self.GRF_L) ** 2)
 
-        # Perturb near the steady state (u*≈1-q, v*≈u*, w*≈u*)
-        u_ss = 1.0 - 0.01  # near the oxidised steady state
-        u0 = u_ss * np.ones(n) + 0.05 * rng.standard_normal(n)
-        v0 = u_ss * np.ones(n) + 0.05 * rng.standard_normal(n)
-        w0 = u_ss * np.ones(n) + 0.05 * rng.standard_normal(n)
+        # Complex white noise (Hermitian symmetry enforced by rfft convention)
+        noise = (rng.standard_normal(len(k)) + 1j * rng.standard_normal(len(k)))
+        noise[0] = rng.standard_normal()                # DC must be real
+        if n % 2 == 0:
+            noise[-1] = rng.standard_normal()           # Nyquist must be real
 
-        # Random localised excitation patch to seed wave propagation
-        r = max(1, n // 16)
-        start = rng.integers(0, n - r)
-        u0[start:start + r] = 0.1
-        w0[start:start + r] = 0.9
+        fld = np.fft.irfft(np.sqrt(S) * noise, n=n)
+        fld -= fld.mean()
+        std = fld.std()
+        if std > 1e-10:
+            fld /= std
+        return fld
 
-        # Clip to physically meaningful range
-        u0 = np.clip(u0, 1e-4, 1.0 - 1e-4)
-        v0 = np.clip(v0, 1e-4, 1.0 - 1e-4)
-        w0 = np.clip(w0, 1e-4, 1.0 - 1e-4)
+    # ------------------------------------------------------------------
+    # Simulation
+    # ------------------------------------------------------------------
 
-        return np.concatenate([u0, v0, w0])
+    def _simulate(self, traj_idx: int) -> np.ndarray:
+        """Simulate one trajectory. Returns [3, T, N_COARSE]."""
+        seed = traj_idx if not self.is_test else self.max_seed - traj_idx
+        rng  = np.random.default_rng(seed)
+
+        # Independent GRF for each channel; scale to small amplitude
+        u = 0.1 * self._grf(rng)
+        v = 0.1 * self._grf(rng)
+        w = 0.1 * self._grf(rng)
+
+        s = self._stride
+        snaps = []
+        for _ in range(self.n_snapshots):
+            for _ in range(self._steps_per_snap):
+                u, v, w = self._step(u, v, w)
+            snaps.append(np.stack([u[::s], v[::s], w[::s]], axis=0))  # [3, N_COARSE]
+
+        return np.stack(snaps, axis=1)   # [3, T, N_COARSE]
 
     # ------------------------------------------------------------------
     # Dataset interface
     # ------------------------------------------------------------------
 
     def __len__(self) -> int:
-        return self.len
+        return self.num_traj
 
-    def __getitem__(self, index: int) -> dict:
-        env = index // self.num_traj_per_env
-        traj_idx = index % self.num_traj_per_env
+    def __getitem__(self, idx: int) -> dict:
+        if idx not in self.buffer:
+            self.buffer[idx] = self._simulate(idx)
+        state = torch.from_numpy(self.buffer[idx]).float()   # [3, T, N_COARSE]
+        return {"state": state, "env": 0}
 
-        if index not in self.buffer:
-            y0 = self._get_init_cond(traj_idx)
-            t_span = (0.0, self.time_horizon)
-            t_eval = np.arange(0.0, self.time_horizon, self.dt_eval)
-
-            sol = solve_ivp(
-                partial(self._rhs, env=env),
-                t_span,
-                y0,
-                method=self.method,
-                t_eval=t_eval,
-                rtol=1e-5,
-                atol=1e-7,
-                dense_output=False,
-            )
-
-            n = self.n_points
-            T = sol.y.shape[1]
-
-            # sol.y : (3*n, T)
-            u_traj = torch.tensor(sol.y[0:n].T, dtype=torch.float32)        # [T, n]
-            v_traj = torch.tensor(sol.y[n:2*n].T, dtype=torch.float32)      # [T, n]
-            w_traj = torch.tensor(sol.y[2*n:3*n].T, dtype=torch.float32)    # [T, n]
-
-            # stack -> [3, T, n]
-            state = torch.stack([u_traj, v_traj, w_traj], dim=0)
-            self.buffer[index] = state.numpy()
-
-        state = torch.from_numpy(self.buffer[index])  # [3, T, n]
-        t = torch.arange(self.n_steps, dtype=torch.float32) * self.dt_eval
-
-        return {"state": state, "t": t, "env": env}
-
-
-# ------------------------------------------------------------------
-# Default parameter sets (different wave speeds / oscillation periods)
-# ------------------------------------------------------------------
 
 def default_bz_params() -> list:
-    """
-    Four BZ environments with slightly varying ε, δ, q.
-    Keeping D_u, D_v, D_w fixed; varying kinetics to get different dynamics.
-    """
-    base = dict(D_u=2e-3, D_v=0.0, D_w=1e-3)
-    envs = [
-        dict(eps=0.04,  delta=0.50, q=0.002, **base),
-        dict(eps=0.05,  delta=0.45, q=0.002, **base),
-        dict(eps=0.035, delta=0.55, q=0.003, **base),
-        dict(eps=0.045, delta=0.40, q=0.0015, **base),
-    ]
-    return envs
+    """Single environment — paper uses fixed ε₁=ε₂=0.01, ε₃=0.005."""
+    return [{"eps1": BZDataset.EPS1, "eps2": BZDataset.EPS2, "eps3": BZDataset.EPS3}]

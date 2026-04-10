@@ -17,9 +17,11 @@ Output format per system:
              (1 env, 2 proc, 2 snapshots=t0+tT, 64×64 grid)
     lv   →  [N_traj, 1,     2, 2,  256]       saved as  lv_<n_samples>.pt
              (1 env, 2 proc, 2 snapshots=t0+tT, 256-pt spatial mesh)
-    bz   →  [N_traj, N_env, 3, T, 256]        saved as  bz_<n_samples>.pt
+    bz   →  [N_traj, 1,     3, 20, 256]       saved as  bz_<n_samples>.pt
+             (1 env, 3 proc, 20 snapshots, 256-pt mesh)
     mpf  →  [N_traj, N_env, 2, T, 64,  64]   saved as  mpf_<n_samples>.pt
-    thm  →  [N_traj, N_env, 5, T, 64,  64]   saved as  thm_<n_samples>.pt
+    thm  →  [N_traj, 1,     3, 12, 64,  64]  saved as  thm_<n_samples>.pt
+             (1 env, 3 proc: p/ε_v/T, 12 non-uniform steps, 64×64)
 
 Generation matches COMPOL paper (arXiv:2501.17296) settings:
   GS:  Single env, D_u=0.12, D_v=0.06, F=0.054, k=0.063, T=20
@@ -58,9 +60,9 @@ for _p in [str(_DS_DIR), str(_LEADS_DIR)]:
     if _p not in sys.path and Path(_p).exists():
         sys.path.insert(0, _p)
 
-from bz_dataset import BZDataset, default_bz_params                 # local
+from bz_dataset import BZDataset                                     # local
 from multiphase_dataset import MultiphaseFlowDataset, default_mpf_params  # local
-from thm_dataset import THMDataset, default_thm_params                    # local
+from thm_dataset import THMDataset                                         # local
 
 
 # ---------------------------------------------------------------------------
@@ -366,42 +368,38 @@ def generate_lv(n_samples: int, output_dir: Path, workers: int) -> Path:
 # ---------------------------------------------------------------------------
 
 def generate_bz(n_samples: int, output_dir: Path, workers: int) -> Path:
+    """
+    Generate Belousov-Zhabotinsky data matching COMPOL paper (arXiv:2501.17296):
+
+    Equations: ∂u/∂t = ε₁∇²u + u + v − uv − u²
+               ∂v/∂t = ε₂∇²v + w − v − uv
+               ∂w/∂t = ε₃∇²w + u − w
+    Params: ε₁=ε₂=0.01, ε₃=0.005, T_end=0.5, domain [0,1] periodic.
+    Solver: ETDRK4 pseudo-spectral, dt=5×10⁻⁴.
+    IC:     independent 1-D GRFs (Gaussian kernel, l=0.03), scaled by 0.1.
+    Grid:   1024 (fine) → subsampled to 256, 20 snapshots.
+    Envs:   N_env=1 (fixed parameters, ICs vary).
+
+    Output shape: [N_traj, 1, 3, 20, 256]
+    """
     n_train, n_val, n_test, total = _split_sizes(n_samples)
 
-    params = default_bz_params()   # 4 environments
-    n_env = len(params)
-    n_traj = _traj_per_env(total, n_env)
+    print(f"[BZ] generating {total} trajectories "
+          f"({n_train} train / {n_val} val / {n_test} test)")
+    print(f"     ε₁=ε₂=0.01  ε₃=0.005  T_end=0.5  grid:1024→256  20 snapshots")
 
-    # 256 spatial points, 20 time snapshots (t ∈ [0, 20], dt_eval=1.0)
-    time_horizon = 20.0
-    dt_eval = 1.0
-    n_points = 256
-
-    print(f"[BZ] generating {n_traj} traj × {n_env} envs = {n_traj * n_env} total "
-          f"(spatial: {n_points} pts,  time: {int(time_horizon / dt_eval)} steps)")
-
-    dataset = BZDataset(
-        num_traj_per_env=n_traj,
-        n_points=n_points,
-        time_horizon=time_horizon,
-        dt_eval=dt_eval,
-        params=params,
-        method="RK45",
-        group="train",
-    )
-
-    loader = DataLoader(dataset, batch_size=1, num_workers=workers, shuffle=False)
+    # Train split (seeds 0..n_traj-1)
+    train_ds = BZDataset(num_traj=total, group="train")
+    loader   = DataLoader(train_ds, batch_size=1, num_workers=workers, shuffle=False)
 
     all_states = []
     for i, sample in enumerate(loader):
-        # sample['state']: [1, 3, T, n_points]
-        all_states.append(sample["state"].squeeze(0))  # [3, T, n_points]
-        if (i + 1) % 50 == 0:
-            print(f"  ... {i+1}/{len(dataset)}")
+        all_states.append(sample["state"])   # [1, 3, 20, 256] — already float32
+        if (i + 1) % 100 == 0:
+            print(f"  ... {i+1}/{total}", flush=True)
 
-    data = torch.stack(all_states, dim=0)  # [n_traj * n_env, 3, T, n_points]
-    n_proc, T, N = data.shape[1], data.shape[2], data.shape[3]
-    data = data.view(n_traj, n_env, n_proc, T, N)
+    # Stack: [total, 3, 20, 256] → unsqueeze N_env → [total, 1, 3, 20, 256]
+    data = torch.stack([s.squeeze(0) for s in all_states], dim=0).unsqueeze(1)
 
     out_path = output_dir / f"bz_{n_samples}.pt"
     torch.save(data, out_path)
@@ -476,54 +474,37 @@ def generate_mpf(n_samples: int, output_dir: Path, workers: int) -> Path:
 
 def generate_thm(n_samples: int, output_dir: Path, workers: int) -> Path:
     """
-    Generate Thermal-Hydro-Mechanical dataset using operator splitting.
+    Generate Thermo-Hydro-Mechanical dataset matching COMPOL paper:
 
-    Three environments with different material properties (stiffness, permeability).
-    Each trajectory has a different smooth random initial T and p distribution.
+    Setting: 2-D 64×64 grid, 32m×32m domain, periodic BC.
+    Physics:  Biot thermo-poroelasticity (quasi-static), 3 channels: p, ε_v, T.
+    Timesteps: 12 non-uniform — 2×500s, 4×1250s, 4×2250s, 2×4000s.
+    IC:  random T field in [273, 323] K (GRF), fractal permeability per traj.
+    Envs: N_env=1 (single set of material params, IC and k vary).
 
-    Output shape: [n_traj, n_env, 5, T, 64, 64]
-        channel 0: T   (temperature)
-        channel 1: p   (pore pressure)
-        channel 2: ux  (x-displacement)
-        channel 3: uy  (y-displacement)
-        channel 4: ev  (volumetric strain)
+    Output shape: [N_traj, 1, 3, 12, 64, 64]
+        channel 0: p    (pore pressure, normalised)
+        channel 1: ε_v  (volumetric strain, normalised)
+        channel 2: T    (temperature, normalised)
     """
     n_train, n_val, n_test, total = _split_sizes(n_samples)
-    params = default_thm_params()   # 3 environments
-    n_env  = len(params)
-    n_traj = _traj_per_env(total, n_env)
 
-    # Time: 10 snapshots at dt_eval = 0.1  (dimensionless time horizon = 1.0)
-    time_horizon = 1.0
-    dt_eval      = 0.1
-    size         = 64
+    print(f"[THM] generating {total} trajectories "
+          f"({n_train} train / {n_val} val / {n_test} test)")
+    print(f"     64×64 grid, 32m×32m, 12 steps "
+          f"[2×500s, 4×1250s, 4×2250s, 2×4000s], N_env=1")
 
-    print(
-        f"[THM] generating {n_traj} traj × {n_env} envs = {n_traj * n_env} total "
-        f"(need {total}: {n_train} train / {n_val} val / {n_test} test)  "
-        f"grid={size}×{size}, T={int(time_horizon/dt_eval)} snapshots"
-    )
-
-    dataset = THMDataset(
-        num_traj_per_env=n_traj,
-        size=size,
-        time_horizon=time_horizon,
-        dt_eval=dt_eval,
-        params=params,
-        group="train",
-    )
-
-    loader = DataLoader(dataset, batch_size=1, num_workers=workers, shuffle=False)
+    dataset = THMDataset(num_traj=total, group="train")
+    loader  = DataLoader(dataset, batch_size=1, num_workers=workers, shuffle=False)
 
     all_states = []
     for i, sample in enumerate(loader):
-        all_states.append(sample["state"].squeeze(0))   # [5, T, H, W]
+        all_states.append(sample["state"])   # [1, 3, 12, 64, 64]
         if (i + 1) % 50 == 0:
-            print(f"  ... {i+1}/{len(dataset)}")
+            print(f"  ... {i+1}/{total}", flush=True)
 
-    data = torch.stack(all_states, dim=0)                # [n_traj*n_env, 5, T, H, W]
-    T_steps, H, W = data.shape[2], data.shape[3], data.shape[4]
-    data = data.view(n_traj, n_env, 5, T_steps, H, W)   # [n_traj, n_env, 5, T, 64, 64]
+    # Stack: [total, 3, 12, 64, 64] → unsqueeze N_env → [total, 1, 3, 12, 64, 64]
+    data = torch.stack([s.squeeze(0) for s in all_states], dim=0).unsqueeze(1)
 
     out_path = output_dir / f"thm_{n_samples}.pt"
     torch.save(data, out_path)
