@@ -111,7 +111,7 @@ Data loaders live in `meanflow/data_loaders/`. The baselines script adds this to
 
 **Datasets supported in `baselines/train_baseline.py`:** `grayscott`, `lv`, `multiphase` (reuses grayscott loader).
 
-**BZ and THM** have data generators and slurm scripts but are **not yet integrated** into `train_coupled.py` or `train_baseline.py`. Doing so would require new data loaders, and updating `COUPLED_CONFIGS` for BZ (3-process 1D) and THM (3-channel 2D).
+**BZ and THM** have data generators and slurm scripts but are **not yet integrated** into `train_coupled.py` or `train_baseline.py`. Doing so would require new data loaders, and updating `COUPLED_CONFIGS` for BZ (3-process 1D) and THM (5-channel 2D).
 
 ### Baseline Models (`baselines/models/`)
 
@@ -136,7 +136,7 @@ All models receive `in_channels = n_proc * channels_per_proc` (processes concate
 | `lv` | `lv_{N}.pt` | 1D, len=256 | 2 (u, v) | 1 | Yes |
 | `bz` | `bz_{N}.pt` | 1D, len=256 | 3 (u, v, w) | 1 | Data only |
 | `mpf` | `mpf_{N}.pt` | 2D, 64×64 | 2 (Sw, P) | 3 | Via `--dataset=grayscott` |
-| `thm` | `thm_{N}.pt` | 2D, 64×64 | 3 (p, ε_v, T) | 1 | Data only |
+| `thm` | `thm_{N}.pt` | 2D, 64×64 | 5 (T, p, ε_xx, ε_yy, ε_xy) | 1 | Data only |
 
 ### Key CLI Flags
 

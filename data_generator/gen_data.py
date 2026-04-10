@@ -20,8 +20,8 @@ Output format per system:
     bz   →  [N_traj, 1,     3, 20, 256]       saved as  bz_<n_samples>.pt
              (1 env, 3 proc, 20 snapshots, 256-pt mesh)
     mpf  →  [N_traj, N_env, 2, T, 64,  64]   saved as  mpf_<n_samples>.pt
-    thm  →  [N_traj, 1,     3, 12, 64,  64]  saved as  thm_<n_samples>.pt
-             (1 env, 3 proc: p/ε_v/T, 12 non-uniform steps, 64×64)
+    thm  →  [N_traj, 1,     5, 12, 64,  64]  saved as  thm_<n_samples>.pt
+             (1 env, 5 proc: T/p/ε_xx/ε_yy/ε_xy, 12 non-uniform steps, 64×64)
 
 Generation matches COMPOL paper (arXiv:2501.17296) settings:
   GS:  Single env, D_u=0.12, D_v=0.06, F=0.054, k=0.063, T=20
@@ -477,15 +477,17 @@ def generate_thm(n_samples: int, output_dir: Path, workers: int) -> Path:
     Generate Thermo-Hydro-Mechanical dataset matching COMPOL paper:
 
     Setting: 2-D 64×64 grid, 32m×32m domain, periodic BC.
-    Physics:  Biot thermo-poroelasticity (quasi-static), 3 channels: p, ε_v, T.
+    Physics:  Biot thermo-poroelasticity (quasi-static), 5 channels.
     Timesteps: 12 non-uniform — 2×500s, 4×1250s, 4×2250s, 2×4000s.
     IC:  random T field in [273, 323] K (GRF), fractal permeability per traj.
     Envs: N_env=1 (single set of material params, IC and k vary).
 
-    Output shape: [N_traj, 1, 3, 12, 64, 64]
-        channel 0: p    (pore pressure, normalised)
-        channel 1: ε_v  (volumetric strain, normalised)
-        channel 2: T    (temperature, normalised)
+    Output shape: [N_traj, 1, 5, 12, 64, 64]
+        channel 0: T    (temperature, normalised)
+        channel 1: p    (pore pressure, normalised)
+        channel 2: ε_xx (normal strain x, normalised)
+        channel 3: ε_yy (normal strain y, normalised)
+        channel 4: ε_xy (shear strain, normalised)
     """
     n_train, n_val, n_test, total = _split_sizes(n_samples)
 
@@ -499,11 +501,11 @@ def generate_thm(n_samples: int, output_dir: Path, workers: int) -> Path:
 
     all_states = []
     for i, sample in enumerate(loader):
-        all_states.append(sample["state"])   # [1, 3, 12, 64, 64]
+        all_states.append(sample["state"])   # [1, 5, 12, 64, 64]
         if (i + 1) % 50 == 0:
             print(f"  ... {i+1}/{total}", flush=True)
 
-    # Stack: [total, 3, 12, 64, 64] → unsqueeze N_env → [total, 1, 3, 12, 64, 64]
+    # Stack: [total, 5, 12, 64, 64] → unsqueeze N_env → [total, 1, 5, 12, 64, 64]
     data = torch.stack([s.squeeze(0) for s in all_states], dim=0).unsqueeze(1)
 
     out_path = output_dir / f"thm_{n_samples}.pt"
