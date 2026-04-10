@@ -132,7 +132,7 @@ All models receive `in_channels = n_proc * channels_per_proc` (processes concate
 
 | System flag | Dataset file | Dim | Channels | N_env | Integrated in training |
 |---|---|---|---|---|---|
-| `gs` | `gs_{N}.pt` | 2D, 64×64 | 2 (u, v) | 1 | Yes |
+| `gs` | `gs_{N}.pt` | 2D, 64×64 | 2 (u, v) | 1 | Yes — **block IC + T_warmup=200 burn-in + T_pred=20** |
 | `lv` | `lv_{N}.pt` | 1D, len=256 | 2 (u, v) | 1 | Yes |
 | `bz` | `bz_{N}.pt` | 1D, len=256 | 3 (u, v, w) | 1 | Data only |
 | `mpf` | `mpf_{N}.pt` | 2D, 64×64 | 2 (Sw, P) | 3 | Via `--dataset=grayscott` |
