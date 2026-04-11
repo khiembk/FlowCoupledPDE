@@ -29,6 +29,7 @@ from torch.utils.tensorboard import SummaryWriter
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "meanflow"))
 from data_loaders.grayscott_loader import build_grayscott_dataloader
 from data_loaders.lv_loader import build_lv_dataloader
+from data_loaders.bz_loader import build_bz_dataloader
 
 from models import (
     FNO1d, FNO2d,
@@ -202,19 +203,37 @@ def build_dataloaders(args):
         else:
             test_loader = val_loader
         return train_loader, val_loader, test_loader
+    if args.dataset == "bz":
+        kw = dict(
+            data_path=args.data_path,
+            batch_size=args.batch_size,
+            num_workers=args.num_workers,
+            horizon=1,
+            train_ratio=args.train_ratio,
+            val_ratio=args.val_ratio,
+        )
+        has_test = (args.train_ratio + args.val_ratio) < 1.0
+        _, train_loader = build_bz_dataloader(split="train", shuffle=True, **kw)
+        _, val_loader   = build_bz_dataloader(split="val",   shuffle=False, drop_last=False, **kw)
+        if has_test:
+            _, test_loader = build_bz_dataloader(split="test", shuffle=False, drop_last=False, **kw)
+        else:
+            test_loader = val_loader
+        return train_loader, val_loader, test_loader
     raise NotImplementedError(f"Dataset {args.dataset!r} not supported yet. "
                               "Add a loader in build_dataloaders().")
 
 
 def batch_to_xy(batch):
     """
-    Convert a batch tuple (z1_1, z1_2, z0_1, z0_2) to
+    Convert a batch tuple (z1_1, ..., z1_n, z0_1, ..., z0_n) to
     concatenated input x [B, n_proc, *spatial] and
     concatenated target y [B, n_proc, *spatial].
+    Works for any number of processes (2 for GS/LV, 3 for BZ, etc.).
     """
-    z1_1, z1_2, z0_1, z0_2 = batch
-    x = torch.cat([z1_1, z1_2], dim=1)
-    y = torch.cat([z0_1, z0_2], dim=1)
+    n_proc = len(batch) // 2
+    x = torch.cat(list(batch[:n_proc]), dim=1)
+    y = torch.cat(list(batch[n_proc:]), dim=1)
     return x, y
 
 
@@ -225,14 +244,17 @@ def batch_to_xy(batch):
 @torch.no_grad()
 def evaluate(model: nn.Module, loader, device) -> dict:
     model.eval()
-    n_proc = 2  # TODO: generalise
-    num = [0.0] * n_proc
-    den = [0.0] * n_proc
+    num = []
+    den = []
 
     for batch in loader:
         x, y = batch_to_xy(batch)
         x, y = x.to(device, non_blocking=True), y.to(device, non_blocking=True)
         pred = model(x)
+        n_proc = len(batch) // 2
+        if not num:
+            num = [0.0] * n_proc
+            den = [0.0] * n_proc
         C_per = pred.shape[1] // n_proc
         for i in range(n_proc):
             p_i = pred[:, i * C_per:(i + 1) * C_per]
@@ -333,7 +355,7 @@ def get_args():
     p = argparse.ArgumentParser("Baseline training for coupled PDEs")
 
     # ── dataset ──────────────────────────────────────────────────────────────
-    p.add_argument("--dataset", default="grayscott", choices=["grayscott", "lv", "multiphase"])
+    p.add_argument("--dataset", default="grayscott", choices=["grayscott", "lv", "multiphase", "bz"])
     p.add_argument("--data_path", required=True)
     p.add_argument("--train_ratio", type=float, default=0.8,
                    help="Fraction of trajectories used for training.")

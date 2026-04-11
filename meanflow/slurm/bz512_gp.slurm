@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-#SBATCH --job-name=mpf512_gp
+#SBATCH --job-name=bz512_gp
 #SBATCH --partition=gpu
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
@@ -15,19 +15,17 @@ conda activate pdemeanflow
 
 cd /home/u.kt348068/khiemtt/FlowCoupledPDE/meanflow
 
-DATA=/scratch/user/u.kt348068/PDE_data/mpf_512.pt
-OUT=/scratch/user/u.kt348068/ckpt/mpf512_gp
+DATA=/scratch/user/u.kt348068/PDE_data/bz_512.pt
+OUT=/scratch/user/u.kt348068/ckpt/bz512_gp
 
 export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 unset SLURM_PROCID
 
-python train_coupled.py \
-    --dataset=grayscott \
+python train_bz.py \
     --data_path=$DATA \
     --output_dir=$OUT \
     --train_ratio=0.6305 \
     --val_ratio=0.1232 \
-    --arch=unet \
     --batch_size=32 \
     --lr=0.0006 \
     --epochs=500 \
@@ -45,9 +43,6 @@ python train_coupled.py \
     --ema_decay=0.9999 \
     --ema_decays 0.99995 0.9996 \
     --log_per_step=100 \
-    --use_gp \
-    --dice_prob=0.5 \
-    --gp_log_length_scale=0.0 \
     --num_workers=4 \
     --pin_mem \
     --seq_loss \

@@ -60,6 +60,18 @@ COUPLED_CONFIGS = {
         "channel_mult_noise": 2,
         "embedding_type":     "positional",
     },
+    # BZ: 3-process 1D system — used by CoupledFlowBZ (separate from CoupledFlow)
+    "unet1d_bz": {
+        "seq_len":            256,
+        "in_channels":        3,    # 3 BZ processes concatenated
+        "out_channels":       1,
+        "model_channels":     64,
+        "channel_mult":       (1, 2, 2, 2),
+        "num_blocks":         2,
+        "attn_resolutions":   (32,),
+        "channel_mult_noise": 2,
+        "embedding_type":     "positional",
+    },
 }
 
 
@@ -92,3 +104,13 @@ def instantiate_coupled_model(args) -> nn.Module:
         n2_configs['augment_dim'] = 6
 
     return CoupledFlow(arch=arch, net1_configs=n1_configs, net2_configs=n2_configs, args=args)
+
+
+def instantiate_coupled_bz_model(args) -> nn.Module:
+    """Instantiate CoupledFlowBZ (3-process) for BZ training. Separate from instantiate_coupled_model."""
+    from models.coupled_flow_bz import CoupledFlowBZ
+    cfg = copy.deepcopy(COUPLED_CONFIGS["unet1d_bz"])
+    n1 = copy.deepcopy(cfg); n1['dropout'] = args.dropout
+    n2 = copy.deepcopy(cfg); n2['dropout'] = args.dropout
+    n3 = copy.deepcopy(cfg); n3['dropout'] = args.dropout
+    return CoupledFlowBZ(arch=SongUNet1d, net1_configs=n1, net2_configs=n2, net3_configs=n3, args=args)
