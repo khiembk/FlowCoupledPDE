@@ -103,56 +103,55 @@ def train_bezier_step(model_without_ddp, source_1, source_2, target_1, target_2,
 def train_bezier_meta_step(model_without_ddp, source_1, source_2, target_1, target_2,
                             theta_lr: float, aug_cond=None):
     """
-    True Algorithm 1 meta-gradient update (Eq. 12–14 in the paper).
+    True Algorithm 1 (Eq. 12–14 in the paper).
 
-    φ receives gradient via the full chain:
-        L_global(θ̃) → θ̃ → ∇_θ L_local → z_t(φ), v_t(φ)
+    Two strictly separate updates:
+      Step 1 — θ update: θ̃ = θ - η ∇_θ L_local
+                θ.grad ← ∇_θ L_local   (set here, optimizer.step() applies it)
+                φ is NOT touched.
 
-    Implementation:
-        1. Compute ∇_θ L_local with create_graph=True (keeps the inner graph).
-        2. Build virtual θ̃ = θ - theta_lr · ∇_θ L_local  (in-graph tensors,
-           no in-place mutation so the chain is intact).
-        3. Evaluate L_global with functional_call(θ̃) — no param mutation.
-        4. backward(L_global) propagates meta-gradient all the way to φ.
+      Step 2 — φ update: φ̃ = φ - η₁ ∇_φ L_global(θ̃)
+                The chain is:  L_global(θ̃) → θ̃ → ∇_θ L_local → z_t(φ), v_t(φ)
+                φ.grad ← ∇_φ L_global(θ̃)   (targeted autograd.grad, θ never touched)
 
-    Also backprop ∇_θ L_local manually so θ gets the standard local gradient.
+    create_graph=True in Step 1 keeps the computation graph of ∇_θ L_local alive
+    so that Step 2 can differentiate through it to reach φ.
 
-    Memory: roughly 2× the standard step (create_graph keeps intermediate acts).
+    Memory: roughly 2× the standard step.
     """
-    # ── Gather named theta parameters ────────────────────────────────────────
-    net1_named = dict(model_without_ddp.net1.named_parameters())
-    net2_named = dict(model_without_ddp.net2.named_parameters())
+    # ── Gather parameters ────────────────────────────────────────────────────
+    net1_named   = dict(model_without_ddp.net1.named_parameters())
+    net2_named   = dict(model_without_ddp.net2.named_parameters())
     theta_params = list(net1_named.values()) + list(net2_named.values())
+    phi_params   = list(model_without_ddp.encoding_net.parameters())
     n1 = len(net1_named)
 
-    # ── Step 1: local loss, keep graph for meta-gradient ─────────────────────
+    # ── Step 1: θ update via L_local ─────────────────────────────────────────
     local_loss = model_without_ddp.forward_local_loss(source_1, source_2, target_1, target_2)
 
+    # create_graph=True: keeps the graph of theta_grads so Step 2 can
+    # differentiate through them to reach φ.
     theta_grads = torch.autograd.grad(
         local_loss, theta_params,
-        create_graph=True,   # keep graph so L_global can flow back through these grads to φ
+        create_graph=True,
         allow_unused=True,
     )
 
-    # Assign local gradients to .grad so optimizer.step() picks them up
+    # Write ∇_θ L_local into .grad — optimizer.step() will apply η * grad.
+    # detach() so the optimizer update does not carry the meta-graph further.
     for p, g in zip(theta_params, theta_grads):
         if g is not None:
-            if p.grad is None:
-                p.grad = g.detach().clone()
-            else:
-                p.grad.add_(g.detach())
+            p.grad = g.detach().clone()
 
-    # ── Step 2: virtual θ̃ and L_global via functional_call ──────────────────
-    net1_grads = theta_grads[:n1]
-    net2_grads = theta_grads[n1:]
-
+    # ── Step 2: φ update via L_global(θ̃) ────────────────────────────────────
+    # Build virtual θ̃ = θ - η * ∇_θ L_local  (in-graph tensors, no .data mutation)
     net1_tilde = {
         k: p - theta_lr * g if g is not None else p
-        for (k, p), g in zip(net1_named.items(), net1_grads)
+        for (k, p), g in zip(net1_named.items(), theta_grads[:n1])
     }
     net2_tilde = {
         k: p - theta_lr * g if g is not None else p
-        for (k, p), g in zip(net2_named.items(), net2_grads)
+        for (k, p), g in zip(net2_named.items(), theta_grads[n1:])
     }
 
     device = source_1.device
@@ -162,8 +161,7 @@ def train_bezier_meta_step(model_without_ddp, source_1, source_2, target_1, targ
     t1   = torch.ones(bsz,  device=device, dtype=dtype)
     r0   = torch.zeros(bsz, device=device, dtype=dtype)
     t1_b = model_without_ddp._expand_time_like(t1, source_1)
-    r0_b = model_without_ddp._expand_time_like(r0, source_1)
-    h_b  = t1_b - r0_b
+    h_b  = t1_b - model_without_ddp._expand_time_like(r0, source_1)
     inp  = torch.cat([source_1, source_2], dim=1)
 
     u1_tilde = functional_call(
@@ -180,17 +178,24 @@ def train_bezier_meta_step(model_without_ddp, source_1, source_2, target_1, targ
     v1_global = source_1 - target_1
     v2_global = source_2 - target_2
 
-    # Use adaptive weighting consistent with _adaptive_reduce
     args = model_without_ddp.args
-    sq1 = ((u1_tilde - v1_global) ** 2).flatten(1).sum(dim=1)
-    sq2 = ((u2_tilde - v2_global) ** 2).flatten(1).sum(dim=1)
+    sq1  = ((u1_tilde - v1_global) ** 2).flatten(1).sum(dim=1)
+    sq2  = ((u2_tilde - v2_global) ** 2).flatten(1).sum(dim=1)
     if getattr(args, "use_adaptive_weight", True):
         sq1 = sq1 / (sq1.detach() + args.norm_eps) ** args.norm_p
         sq2 = sq2 / (sq2.detach() + args.norm_eps) ** args.norm_p
     global_loss = sq1.mean() + sq2.mean()
 
-    # backward flows: global_loss → θ̃ → ∇_θ L_local → z_t(φ) → φ
-    global_loss.backward()
+    # Compute ∇_φ L_global(θ̃) targeted at φ only.
+    # Chain: global_loss → θ̃ → theta_grads (graph kept) → L_local → z_t(φ) → φ
+    # θ.grad is NOT modified here — only φ.grad is written.
+    phi_grads = torch.autograd.grad(
+        global_loss, phi_params,
+        allow_unused=True,
+    )
+    for p, g in zip(phi_params, phi_grads):
+        if g is not None:
+            p.grad = g.clone()
 
     return (local_loss + global_loss).detach()
 
