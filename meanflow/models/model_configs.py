@@ -7,6 +7,7 @@ from models.unet1d import SongUNet1d
 
 MODEL_ARCHS = {
     "unet":   SongUNet,
+    "unet32": SongUNet,
     "unet1d": SongUNet1d,
 }
 
@@ -48,6 +49,17 @@ COUPLED_CONFIGS = {
         "encoder_type": "standard",
         "decoder_type": "standard",
         "use_checkpoint": True,
+    },
+    "unet32": {
+        "img_resolution": 32,       # tiny_set / small spatial resolution 32×32
+        "in_channels": 2,
+        "out_channels": 1,
+        "channel_mult_noise": 2,
+        "resample_filter": [1, 3, 3, 1],
+        "channel_mult": [2, 2, 2],
+        "encoder_type": "standard",
+        "decoder_type": "standard",
+        "use_checkpoint": False,
     },
     "unet1d": {
         "seq_len":            256,  # LV sequence length
@@ -121,7 +133,7 @@ def instantiate_bezier_coupled_model(args) -> nn.Module:
     n2_configs["dropout"] = args.dropout
 
     hidden = getattr(args, "bezier_hidden", 64)
-    if architechture == "unet":
+    if architechture in ("unet", "unet32"):
         encoding_net = BezierEncodingNet2d(n_proc=2, channels_per_proc=1, hidden=hidden)
     elif architechture == "unet1d":
         encoding_net = BezierEncodingNet1d(n_proc=2, channels_per_proc=1, hidden=hidden)

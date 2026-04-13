@@ -211,12 +211,10 @@ def main(args):
 
     # ── Train step ────────────────────────────────────────────────────────────
     if args.meta_grad:
-        logger.info("Using true Algorithm 1 meta-gradient: θ updated by L_local+L_global, φ by meta-chain (2× memory)")
-        _step = train_bezier_meta_step  # theta_lr passed dynamically per step from optimizer
+        logger.info("Using Algorithm 1 meta step: eq. 32 chain rule for φ, optimizer.step() for updates")
+        compiled_train_step = None  # meta step is called directly in epoch loop (owns optimizer calls)
     else:
-        _step = train_bezier_step
-
-    compiled_train_step = torch.compile(_step, disable=not getattr(args, "compile", False))
+        compiled_train_step = torch.compile(train_bezier_step, disable=not getattr(args, "compile", False))
 
     # ── Meters ────────────────────────────────────────────────────────────────
     batch_loss = MeanMetric().to(device, non_blocking=True)

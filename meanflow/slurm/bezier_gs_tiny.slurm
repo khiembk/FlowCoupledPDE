@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
-#SBATCH --job-name=bz512_gp
+#SBATCH --job-name=bezier_gs_tiny
 #SBATCH --partition=gpu
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=4
 #SBATCH --gres=gpu:1
-#SBATCH --mem=32G
-#SBATCH --time=10:00:00
+#SBATCH --mem=16G
+#SBATCH --time=01:00:00
 #SBATCH --output=%x_%j.out
 #SBATCH --error=%x_%j.err
 
@@ -15,21 +15,24 @@ conda activate pdemeanflow
 
 cd /home/u.kt348068/khiemtt/FlowCoupledPDE/meanflow
 
-DATA=/scratch/user/u.kt348068/PDE_data/bz_512.pt
-OUT=/scratch/user/u.kt348068/ckpt/bz512_gp
+DATA=/home/u.kt348068/khiemtt/FlowCoupledPDE/data_generator/gray-scott/tiny_set/gs.pt
+OUT=/scratch/user/u.kt348068/ckpt/bezier_gs_tiny
 
 export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 unset SLURM_PROCID
 
-python train_bz.py \
+python bezier_coupled_training.py \
+    --dataset=grayscott \
     --data_path=$DATA \
     --output_dir=$OUT \
-    --train_ratio=0.6305 \
-    --val_ratio=0.1232 \
-    --batch_size=32 \
+    --train_ratio=0.7 \
+    --val_ratio=0.15 \
+    --arch=unet32 \
+    --batch_size=8 \
     --lr=0.0006 \
-    --epochs=500 \
-    --warmup_epochs=100 \
+    --phi_lr=0.0002 \
+    --epochs=100 \
+    --warmup_epochs=20 \
     --eval_frequency=10 \
     --tr_sampler=v1 \
     --P_mean_t=-0.6 \
@@ -42,11 +45,8 @@ python train_bz.py \
     --dropout=0.1 \
     --ema_decay=0.9999 \
     --ema_decays 0.99995 0.9996 \
-    --log_per_step=100 \
-    --use_gp \
-    --dice_prob=0.3333 \
-    --gp_log_length_scale=0.0 \
+    --log_per_step=50 \
+    --bezier_hidden=32 \
     --num_workers=4 \
     --pin_mem \
-    --seq_loss \
     --auto_resume

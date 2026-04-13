@@ -29,7 +29,7 @@ python train_coupled.py \
     --val_ratio=0.1232 \
     --arch=unet \
     --batch_size=32 \
-    --lr=0.0006 \
+    --lr=0.0003 \
     --epochs=500 \
     --warmup_epochs=100 \
     --eval_frequency=10 \
