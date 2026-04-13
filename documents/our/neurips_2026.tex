@@ -199,12 +199,7 @@ The predictive distribution for new vector $\mathrm{x}_{*}$ is
 \begin{align}
     \mathbf{f}(\mathrm{x}_{*}) \mid \mathbf{f}, \mathrm{x}_{*}, X \sim \mathcal{N} \big(\mathbf{f}_{*}(\mathrm{x}_{*}) , \mathbf{K}_{*}(\mathrm{x}_{*}, \mathrm{x}_{*})\big)
 \end{align}
-(\textcolor{red}{Noise-free version, we can modify to noisy observation version based on the experimental results}) with 
-\begin{align}
-    \mathbf{f}_{*}(\mathrm{x}_*) &= \mathbf{K}^{T}_{\mathrm{x}_{*}} \big(\mathbf{K}(X,X) )^{-1} \mathbf{y} \\ 
-    \mathbf{K}_{*}(\mathrm{x}_{*}, \mathrm{x}_{*}) &= \mathbf{K}(\mathrm{x}_{*}, \mathrm{x}_{*}) - \mathbf{K}_{\mathrm{x}_{*}}\big(\mathbf{K}(X,X)\big)^{-1}\mathbf{K}^{T}_{\mathrm{x}_{*}}
-\end{align}
-where $\mathbf{K}_{\mathrm{x}_*} \in \mathbb{R}^{d \times Nd}$ has entries $(\mathbf{K}(\mathrm{x}_{*}, \mathrm{x}_{j}))_{p,q}$ for $j \in [1,N]$ and $p,q \in [1, d]$. Thus, given new input $\mathrm{x}_{*} = (t, z_1)$, we can predict $z_2(\mathrm{x}_{*})$ as 
+where $\mathbf{K}_{\mathrm{x}_*} \in \mathbb{R}^{d \times Nd}$ has entries $(\mathbf{K}(\mathrm{x}_{*}, \mathrm{x}_{j}))_{p,q}$ for $j \in [1,N]$ and $p,q \in [1, d]$ (see Appendix Section~\ref{appendix:GP_details} for implementation details). Thus, given new input $\mathrm{x}_{*} = (t, z_1)$, we can predict $z_2(\mathrm{x}_{*})$ as 
 \begin{equation}
     z_2 (\mathrm{x}_*) = \mathbf{f}_{*} (\mathrm{x}_{*}) \label{eq:infer_z}
 \end{equation}
@@ -218,20 +213,7 @@ partial derivatives as
     \text{cov}\Big(\mathbf{f}_*(\mathrm{x_i}), \frac{\partial \mathbf{f}_*(\mathrm{x_j})}{\partial t}\Big) &= \frac{\partial k(\mathrm{x}_i, \mathrm{x}_j)}{\partial t}  \\ \nonumber
     \text{cov}\Big(\frac{ \partial \mathbf{f}_*(\mathrm{x_i})}{ \partial t}, \frac{\partial \mathbf{f}_*(\mathrm{x_j})}{\partial t}\Big) &= \frac{\partial^2 k(\mathrm{x}_i, \mathrm{x}_j)}{\partial t}
 \end{align}
-For practical implementation, we define the input covariance function as the squared-exponential covariance function as 
-\begin{equation}
-    k(\mathrm{x}_i, \mathrm{x}_j) = \sigma^2_{f} \exp\Big( - \frac{1}{2 \ell^2} \| \mathrm{x}_i - \mathrm{x}_j\|^2_2\Big)
-\end{equation}
-where $\ell$ is the length-scale and $\sigma^2_f$ is the signal variance. To encode the interaction among the output dimensions, we use separable kernels and sum of separable kernels (SOS kernels) \citep{alvarez2012kernelsvectorvaluedfunctionsreview} as the output kernel function, such that 
-\begin{equation}
-    \big(\mathbf{K}(\mathrm{x}_i, \mathrm{x}_j) \big)_{p,q} = k(\mathrm{x}_i, \mathrm{x}_j) k_{T}(p,q)
-\end{equation}
-where $k, k_T$ are scalar kernels on $\mathcal{X} \times \mathcal{X}$ and $\{1,...,n\} \times \{1,..., n \}$. Thus, we have the matrix expression as 
-\begin{align}
-    \mathbf{K}(\mathrm{x}_i, \mathrm{x}_j) &= k(\mathrm{x}_i, \mathrm{x}_j) \mathbf{B} \\
-    \mathbf{K}(X, X) &= \mathbf{B} \otimes k(X,X)
-\end{align}
-where $\mathbf{B}$ is a $d \times d$ symmetric and positive semi-definite matrix, which can be learned via maximizing the log-likelihood~\citep{BonillaMultitaskGauss}.
+
 So that, given $\mathrm{x}_* =(t, z_1)$ we can sample the value of $z_2(\mathrm{x}_*)$ and also compute the instant velocity $u^{\text{ins}}_2 (z_2, \mathrm{x}_*)$, a lasting bottleneck is how we can sample $(t, z_1)$. Inspired from Dice Strategy~\citep{xiao2023coupled} to randomly decide the interaction order between each process in a physical system in the current layer. We first sample $t \sim U(0,1)$ from a uniform distribution, and we then deploy the dice strategy to randomly decide the interaction order between processes $v_1$ and $v_2$ with a predefined probability $p \in [0,1]$. If $v_1$ interact to $v_2$, we model the value of $z^t_1$ as the linear interpolant of time with a fixed ending point
 \begin{equation}
     z^t_1 = (1-t)z^0_1 + t z^1_1
@@ -369,10 +351,67 @@ implementation), all models used a cosine annealing schedule. DeepONet is traine
 \newpage
 \appendix
 
-\section{Technical appendices and supplementary material}
+\section{GP Modeling implementation details}
+\label{appendix:GP_details}
+In this section, we provide the details about $\mathcal{GP}$ modeling for the interpolant of the flow-matching path. As discussed in Section~\ref{sec:Gaussian_coupled}, we model the dependence between two random variable $z_1$ and $z_2$ and time $t$ using Gaussian Processes. The idea here is to model $z^t_1$ as the function of time $t$ and $z^t_2$, and otherwise. That way, we can capture the correlation information among individual processes by randomly deciding the interaction order at each time-step $t$ following the prior practice \citep{xiao2023coupled}. For example, at time-step $t$, we decided the variable $z^t_2$ will impact on the variable $z^t_1$. Let $\mathrm{x} = (t, z^t_2) \in \mathcal{X} \subset \mathbb{R}^{d+1}$ and $\mathrm{y} = z^t_1 = \mathrm{f}(\mathrm{x}) \in \mathbb{R}^{d}$, we model the function $\mathrm{f}$ as a vector-valued GP \citep{alvarez2012kernelsvectorvaluedfunctionsreview}, such that 
+\begin{equation}
+   \mathbf{f} \sim \mathcal{GP}(\mathbf{m}, \mathbf{K})
+\end{equation}
 
+Given the input set as the pair data at beginning time $t=0$ and ending time $t=1$ that $X = \{\mathrm{x}_0; \mathrm{x}_1  \}=\{ (0, z^0_2);  (1, z^1_2)\}$, the prior distribution over the function $\mathrm{f}(X)$ is given by 
+\begin{equation}
+    \mathrm{f}(X) \sim \mathcal{N}(\mathbf{m}(X), \mathbf{K}(X,X))
+\end{equation}
+Given time step $t$, we directly sample $z^t_2$ as the linear interpolant of time,
+\begin{equation}
+    z^t_2 = (1-t) z^0_2 + t z^1_2
+\end{equation}
+Thus, we can construct the new vector $\mathrm{x}_* = (t, z^t_2)$, with the noise-free $\mathcal{GP}$ modeling, we have the predictive distribution as  
+\begin{equation}
+    \mathrm{f}(\mathrm{x}_*) \mid \mathrm{f}, \mathrm{x}_*,X \sim \mathcal{N}(\mathbf{f}_*(x_*), \mathbf{K}_*(\mathrm{x}_*, \mathrm{x}_*))
+\end{equation}
+where 
+\begin{align}
+    \mathbf{f}_{*}(\mathrm{x}_*) &= \mathbf{K}^{T}_{\mathrm{x}_{*}} \big(\mathbf{K}(X,X) )^{-1} \mathbf{y} \\ 
+    \mathbf{K}_{*}(\mathrm{x}_{*}, \mathrm{x}_{*}) &= \mathbf{K}(\mathrm{x}_{*}, \mathrm{x}_{*}) - \mathbf{K}_{\mathrm{x}_{*}}\big(\mathbf{K}(X,X)\big)^{-1}\mathbf{K}^{T}_{\mathrm{x}_{*}}
+\end{align}
+with provided data point $\mathrm{y}_0 = z^0_1$ and $\mathrm{y}_1 = z^1_1$, we have the label vector $\mathbf{y} = [\mathrm{y}_0  \: \mathrm{y}_1]^T \in \mathbb{R}^{2d}$. To encode the correlation information among the output dimensions, we use separable kernels \citep{alvarez2012kernelsvectorvaluedfunctionsreview} as the output kernel function, such that 
+\begin{equation}
+    \mathbf{K}(\mathrm{x}_i, \mathrm{x}_j)  = k(\mathrm{x}_i, \mathrm{x}_j) B
+\end{equation} 
+where $k (\mathrm{x}_i, \mathrm{x}_j)$ are scalar kernels on $\mathcal{X} \times \mathcal{X}$ and $B\in \mathbb{R}^{d \times d}$ is the symmetric and positive semi-definite matrix. Thus, we have the matrix expression as 
+\begin{equation}
+    \mathbf{K}(X, X) = \mathbf{k}_{\mathrm{x}}(X,X)  \otimes  \mathbf{B} 
+\end{equation}
+where 
+\begin{equation}
+    \mathbf{k}_{\mathrm{x}}(X,X) = \begin{bmatrix}
+k(\mathrm{x}_0, \mathrm{x}_0) & k(\mathrm{x}_0, \mathrm{x}_1) \\
+k(\mathrm{x}_1, \mathrm{x}_0) & k(\mathrm{x}_1, \mathrm{x}_1)
+\end{bmatrix}
+\end{equation}
+Similarly, the query-to-train covariance $\mathbf{K}^{T}_{\mathrm{x}_{*}}$ is
+\begin{equation}
+    \mathbf{K}^{T}_{\mathrm{x}_{*}} = [  k(\mathrm{x_*}, \mathrm{x}_0)B  \quad k(\mathrm{x}_{*}, \mathrm{x}_{1})B] = \mathbf{k}^{T}_{\mathrm{x}_{*}} \otimes B
+\end{equation}
+where 
+\begin{equation}
+   \mathbf{k}^{T}_{\mathrm{x}_{*}} =  [  k(\mathrm{x_*}, \mathrm{x}_0)  \quad k(\mathrm{x}_{*}, \mathrm{x}_{1})]
+\end{equation}
+Thus, we have the mean function as $\mathbf{f}_{*}(\mathrm{x}_*)$ as 
+\begin{align}
+    \mathbf{f}_{*}(\mathrm{x}_*) &= \mathbf{K}^{T}_{\mathrm{x}_{*}} \big(\mathbf{K}(X,X) )^{-1} \mathbf{y} \\
+    &= \big(\mathbf{k}^{T}_{\mathrm{x}_{*}} \otimes B \big)\big(\mathbf{k}_{\mathrm{x}}(X,X)^{-1}  \otimes  \mathbf{B}^{-1} \big) \mathbf{y} \\
+    &= \Big(\mathbf{k}^{T}_{\mathrm{x}_{*}} \mathbf{k}_{\mathrm{x}}(X,X)^{-1}\Big) \otimes \Big(B  B^{-1}\Big) \mathbf{y} \\
+    &= \Big( \big(\mathbf{k}^{T}_{\mathrm{x}_{*}} \mathbf{k}_{\mathrm{x}}(X,X)^{-1}\big) \otimes I_{d} \Big)\mathbf{y} \label{eq:mean_function_closed_form}
+\end{align}
+Using Eq.~\ref{eq:mean_function_closed_form}, we have the closed form of the mean function when predicting for the new input $\mathrm{x}_{*}$ without the requirement for the pre-trained matrix $B$. For practical implementation, we define the input covariance function as the squared-exponential covariance function 
+\begin{equation}
+    k(\mathrm{x}_i, \mathrm{x}_j) = \sigma^2_{f} \exp\Big( - \frac{1}{2 \ell^2} \| \mathrm{x}_i - \mathrm{x}_j\|^2_2\Big)
+\end{equation}
+where $\ell$ is the length-scale and $\sigma^2_f$ is the signal variance. 
 
-%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Bezier Modeling implementation details}
 
 \newpage
 \input{checklist.tex}
