@@ -66,7 +66,7 @@ def get_args_parser():
     
     parser.add_argument("--norm_p", default=0.75, type=float, help="Norm power for adaptive weight.")
     parser.add_argument("--norm_eps", default=1e-3, type=float, help="Small constant for adaptive weight division.")
-    parser.add_argument("--arch", default="unet", type=str, choices=["unet", "unet1d"], help="Architecture to use.")
+    parser.add_argument("--arch", default="unet", type=str, choices=["unet", "unet1d", "unet32"], help="Architecture to use.")
     parser.add_argument("--use_edm_aug", action="store_true", dest="use_edm_aug", default=False, help="Enable EDM augmentation with augment labels as conditions.")
 
     # Vector-valued GP + DICE strategy
