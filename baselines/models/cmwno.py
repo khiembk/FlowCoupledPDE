@@ -319,6 +319,38 @@ def _coupled_forward_1d(x1, x2, net1, net2):
     return out1, out2   # each [B, N, 1]
 
 
+def _coupled_forward_Nd(xs, nets):
+    """
+    Generalised N-process coupling (N >= 2).
+    xs:   list of N tensors [B, L, C], one per process.
+    nets: list of N MWT networks.
+    Returns list of N output tensors [B, L, 1].
+
+    Strategy: collect Us from every net (no_grad), then run each net i
+    with the *sum* of Us contributions from all other nets j != i.
+    """
+    n = len(xs)
+    all_Us = []
+    for i in range(n):
+        with torch.no_grad():
+            _, _, Us_i = nets[i](xs[i])
+        all_Us.append(Us_i)
+
+    outs = []
+    for i in range(n):
+        n_cz = len(all_Us[0])
+        us_combined = []
+        for cz_idx in range(n_cz):
+            n_lv = len(all_Us[0][cz_idx])
+            us_combined.append([
+                sum(all_Us[j][cz_idx][lv] for j in range(n) if j != i)
+                for lv in range(n_lv)
+            ])
+        out, _, _ = nets[i](xs[i], u_s=us_combined)
+        outs.append(out)
+    return outs
+
+
 # ---------------------------------------------------------------------------
 # CMWNO1d
 # ---------------------------------------------------------------------------
@@ -351,23 +383,25 @@ class CMWNO1d(nn.Module):
         L: int = 0,
     ):
         super().__init__()
-        assert n_proc == 2, "CMWNO requires exactly 2 coupled processes"
         self.in_channels = in_channels
+        self.n_proc = n_proc
         c = max(1, width // k)
-        self.net1 = MWT(ich=in_channels, k=k, alpha=alpha, c=c, nCZ=n_layers, L=L)
-        self.net2 = MWT(ich=in_channels, k=k, alpha=alpha, c=c, nCZ=n_layers, L=L)
+        self.nets = nn.ModuleList([
+            MWT(ich=in_channels, k=k, alpha=alpha, c=c, nCZ=n_layers, L=L)
+            for _ in range(n_proc)
+        ])
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        # x: [B, 2*C, L]
+        # x: [B, n_proc*C, L]
         C = self.in_channels
-        x1 = x[:, :C].permute(0, 2, 1)    # [B, L, C]
-        x2 = x[:, C:2*C].permute(0, 2, 1) # [B, L, C]
+        xs = [x[:, i*C:(i+1)*C].permute(0, 2, 1) for i in range(self.n_proc)]
 
-        out1, out2 = _coupled_forward_1d(x1, x2, self.net1, self.net2)
-        # out: [B, L, 1] → [B, 1, L]
-        out1 = out1.permute(0, 2, 1)
-        out2 = out2.permute(0, 2, 1)
-        return torch.cat([out1, out2], dim=1)   # [B, 2, L]
+        if self.n_proc == 2:
+            outs = list(_coupled_forward_1d(xs[0], xs[1], self.nets[0], self.nets[1]))
+        else:
+            outs = _coupled_forward_Nd(xs, list(self.nets))
+
+        return torch.cat([o.permute(0, 2, 1) for o in outs], dim=1)  # [B, n_proc, L]
 
 
 # ---------------------------------------------------------------------------

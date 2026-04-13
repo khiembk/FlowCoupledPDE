@@ -11,6 +11,7 @@ import torch.nn as nn
 
 from models.time_sampler import sample_two_timesteps
 from models.ema import init_ema, update_ema_net
+from models.gp_velocity import VectorValuedGP
 
 
 class CoupledFlowBZ(nn.Module):
@@ -34,6 +35,13 @@ class CoupledFlowBZ(nn.Module):
             self.add_module(f"net1_ema{i+1}", init_ema(self.net1, arch(**copy.deepcopy(net1_configs)), decay))
             self.add_module(f"net2_ema{i+1}", init_ema(self.net2, arch(**copy.deepcopy(net2_configs)), decay))
             self.add_module(f"net3_ema{i+1}", init_ema(self.net3, arch(**copy.deepcopy(net3_configs)), decay))
+
+        # GP modules for DICE coupling (one per driver process)
+        if getattr(args, "use_gp", False):
+            log_ls = getattr(args, "gp_log_length_scale", 0.0)
+            self.gp_1 = VectorValuedGP(log_length_scale=log_ls)  # process 1 drives 2 & 3
+            self.gp_2 = VectorValuedGP(log_length_scale=log_ls)  # process 2 drives 1 & 3
+            self.gp_3 = VectorValuedGP(log_length_scale=log_ls)  # process 3 drives 1 & 2
 
     def update_ema(self):
         self.num_updates += 1
@@ -70,6 +78,51 @@ class CoupledFlowBZ(nn.Module):
         h = t - r
         inp = torch.cat([z1, z2, z3], dim=1)
         return net(inp, (t.view(-1), h.view(-1)), aug_cond=None)
+
+    def gp_build_zt_vt(self, source_1, source_2, source_3,
+                        target_1, target_2, target_3, t_b):
+        """
+        DICE strategy for 3 processes (prob 1/3 each):
+          - dice=0: process 1 linear driver, processes 2 & 3 GP-driven by gp_1
+          - dice=1: process 2 linear driver, processes 1 & 3 GP-driven by gp_2
+          - dice=2: process 3 linear driver, processes 1 & 2 GP-driven by gp_3
+        """
+        B = source_1.shape[0]
+        device = source_1.device
+
+        # Linear interpolants and velocities for all 3 processes
+        zt_1_lin = (1.0 - t_b) * target_1 + t_b * source_1
+        zt_2_lin = (1.0 - t_b) * target_2 + t_b * source_2
+        zt_3_lin = (1.0 - t_b) * target_3 + t_b * source_3
+        v_1_lin  = source_1 - target_1
+        v_2_lin  = source_2 - target_2
+        v_3_lin  = source_3 - target_3
+
+        # GP: driver=1 → driven 2 and 3
+        zt_2_gp1, vt_2_gp1 = self.gp_1(t_b, target_1, source_1, target_2, source_2)
+        zt_3_gp1, vt_3_gp1 = self.gp_1(t_b, target_1, source_1, target_3, source_3)
+        # GP: driver=2 → driven 1 and 3
+        zt_1_gp2, vt_1_gp2 = self.gp_2(t_b, target_2, source_2, target_1, source_1)
+        zt_3_gp2, vt_3_gp2 = self.gp_2(t_b, target_2, source_2, target_3, source_3)
+        # GP: driver=3 → driven 1 and 2
+        zt_1_gp3, vt_1_gp3 = self.gp_3(t_b, target_3, source_3, target_1, source_1)
+        zt_2_gp3, vt_2_gp3 = self.gp_3(t_b, target_3, source_3, target_2, source_2)
+
+        # Categorical DICE: 0, 1, 2 with equal probability 1/3
+        dice = torch.randint(0, 3, (B,), device=device)
+        shape = (B,) + (1,) * (source_1.ndim - 1)
+        m0 = (dice == 0).view(shape)  # proc 1 is driver
+        m1 = (dice == 1).view(shape)  # proc 2 is driver
+        m2 = (dice == 2).view(shape)  # proc 3 is driver
+
+        zt_1 = torch.where(m0, zt_1_lin,  torch.where(m1, zt_1_gp2, zt_1_gp3))
+        zt_2 = torch.where(m0, zt_2_gp1,  torch.where(m1, zt_2_lin,  zt_2_gp3))
+        zt_3 = torch.where(m0, zt_3_gp1,  torch.where(m1, zt_3_gp2,  zt_3_lin))
+        vt_1 = torch.where(m0, v_1_lin,   torch.where(m1, vt_1_gp2,  vt_1_gp3))
+        vt_2 = torch.where(m0, vt_2_gp1,  torch.where(m1, v_2_lin,   vt_2_gp3))
+        vt_3 = torch.where(m0, vt_3_gp1,  torch.where(m1, vt_3_gp2,  v_3_lin))
+
+        return zt_1, zt_2, zt_3, vt_1, vt_2, vt_3
 
     def _adaptive_reduce(self, sq):
         if getattr(self.args, "use_adaptive_weight", True):
@@ -151,13 +204,17 @@ class CoupledFlowBZ(nn.Module):
         t_b = self._expand_time_like(t, source_1)
         r_b = self._expand_time_like(r, source_1)
 
-        # Naive linear interpolant (no GP for BZ)
-        zt_1 = (1.0 - t_b) * target_1 + t_b * source_1
-        zt_2 = (1.0 - t_b) * target_2 + t_b * source_2
-        zt_3 = (1.0 - t_b) * target_3 + t_b * source_3
-        v_t_1 = source_1 - target_1
-        v_t_2 = source_2 - target_2
-        v_t_3 = source_3 - target_3
+        if getattr(self.args, "use_gp", False):
+            zt_1, zt_2, zt_3, v_t_1, v_t_2, v_t_3 = self.gp_build_zt_vt(
+                source_1, source_2, source_3, target_1, target_2, target_3, t_b
+            )
+        else:
+            zt_1 = (1.0 - t_b) * target_1 + t_b * source_1
+            zt_2 = (1.0 - t_b) * target_2 + t_b * source_2
+            zt_3 = (1.0 - t_b) * target_3 + t_b * source_3
+            v_t_1 = source_1 - target_1
+            v_t_2 = source_2 - target_2
+            v_t_3 = source_3 - target_3
 
         local1 = self._local_loss_one_process(1, zt_1, zt_2, zt_3, v_t_1, v_t_2, v_t_3, t_b, r_b)
         local2 = self._local_loss_one_process(2, zt_1, zt_2, zt_3, v_t_1, v_t_2, v_t_3, t_b, r_b)

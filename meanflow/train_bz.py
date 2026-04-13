@@ -70,6 +70,10 @@ def get_args_parser():
     p.add_argument("--P_std_r",        type=float, default=1.6)
     p.add_argument("--norm_p",         type=float, default=0.75)
     p.add_argument("--norm_eps",       type=float, default=1e-3)
+    # GP coupling
+    p.add_argument("--use_gp",              action="store_true")
+    p.add_argument("--dice_prob",           type=float, default=1/3)
+    p.add_argument("--gp_log_length_scale", type=float, default=0.0)
     # Logging / checkpointing
     p.add_argument("--output_dir",     required=True)
     p.add_argument("--eval_frequency", type=int,   default=10)
@@ -149,6 +153,12 @@ def main(args):
         + list(model_without_ddp.net2.parameters())
         + list(model_without_ddp.net3.parameters())
     )
+    if getattr(args, "use_gp", False):
+        opt_params += (
+            list(model_without_ddp.gp_1.parameters())
+            + list(model_without_ddp.gp_2.parameters())
+            + list(model_without_ddp.gp_3.parameters())
+        )
     optimizer = torch.optim.Adam(opt_params, lr=args.lr, betas=args.optimizer_betas, weight_decay=0.0)
 
     warmup_iters = args.warmup_epochs * len(train_loader)

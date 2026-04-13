@@ -43,6 +43,9 @@ python train_bz.py \
     --ema_decay=0.9999 \
     --ema_decays 0.99995 0.9996 \
     --log_per_step=100 \
+    --use_gp \
+    --dice_prob=0.3333 \
+    --gp_log_length_scale=0.0 \
     --num_workers=4 \
     --pin_mem \
     --seq_loss \
