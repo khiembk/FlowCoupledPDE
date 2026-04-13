@@ -211,8 +211,8 @@ def main(args):
 
     # ── Train step ────────────────────────────────────────────────────────────
     if args.meta_grad:
-        logger.info("Using true Algorithm 1 meta-gradient update for φ (2× memory)")
-        _step = partial(train_bezier_meta_step, theta_lr=args.lr)
+        logger.info("Using true Algorithm 1 meta-gradient: θ updated by L_local+L_global, φ by meta-chain (2× memory)")
+        _step = train_bezier_meta_step  # theta_lr passed dynamically per step from optimizer
     else:
         _step = train_bezier_step
 
