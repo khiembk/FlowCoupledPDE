@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
-#SBATCH --job-name=gs_gp_1024
+#SBATCH --job-name=bz1024_gp
 #SBATCH --partition=gpu
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=4
 #SBATCH --gres=gpu:1
 #SBATCH --mem=32G
-#SBATCH --time=02:00:00
+#SBATCH --time=10:00:00
 #SBATCH --output=%x_%j.out
 #SBATCH --error=%x_%j.err
 
@@ -15,19 +15,17 @@ conda activate pdemeanflow
 
 cd /home/u.kt348068/khiemtt/FlowCoupledPDE/meanflow
 
-DATA=/scratch/user/u.kt348068/PDE_data/gs_1024.pt
-OUT=/scratch/user/u.kt348068/ckpt/gs_gp_1024
+DATA=/scratch/user/u.kt348068/PDE_data/bz_1024.pt
+OUT=/scratch/user/u.kt348068/ckpt/bz1024_gp
 
 export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 unset SLURM_PROCID
 
-python train_coupled.py \
-    --dataset=grayscott \
+python train_bz.py \
     --data_path=$DATA \
     --output_dir=$OUT \
     --train_ratio=0.7734 \
     --val_ratio=0.0755 \
-    --arch=unet \
     --batch_size=32 \
     --lr=0.0006 \
     --epochs=500 \
@@ -41,12 +39,12 @@ python train_coupled.py \
     --ratio=0.75 \
     --norm_p=0.75 \
     --norm_eps=1e-3 \
-    --dropout=0.2 \
+    --dropout=0.1 \
     --ema_decay=0.9999 \
     --ema_decays 0.99995 0.9996 \
     --log_per_step=100 \
     --use_gp \
-    --dice_prob=0.5 \
+    --dice_prob=0.3333 \
     --gp_log_length_scale=0.0 \
     --num_workers=4 \
     --pin_mem \

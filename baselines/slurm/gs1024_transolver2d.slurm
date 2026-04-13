@@ -33,4 +33,5 @@ python train_baseline.py \
     --warmup_epochs 50 \
     --lr 1e-3 \
     --eval_frequency 20 \
-    --log_per_step 50
+    --log_per_step 50 \
+    --auto_resume

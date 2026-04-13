@@ -106,6 +106,37 @@ def instantiate_coupled_model(args) -> nn.Module:
     return CoupledFlow(arch=arch, net1_configs=n1_configs, net2_configs=n2_configs, args=args)
 
 
+def instantiate_bezier_coupled_model(args) -> nn.Module:
+    """Instantiate CoupledFlowBezier (2-process) with a BezierEncodingNet."""
+    from models.bezier_coupled_flow import CoupledFlowBezier, BezierEncodingNet2d, BezierEncodingNet1d
+
+    architechture = args.arch
+    assert architechture in COUPLED_CONFIGS, \
+        f"Architecture '{architechture}' has no coupled config."
+
+    arch = MODEL_ARCHS[architechture]
+    n1_configs = copy.deepcopy(COUPLED_CONFIGS[architechture])
+    n2_configs = copy.deepcopy(COUPLED_CONFIGS[architechture])
+    n1_configs["dropout"] = args.dropout
+    n2_configs["dropout"] = args.dropout
+
+    hidden = getattr(args, "bezier_hidden", 64)
+    if architechture == "unet":
+        encoding_net = BezierEncodingNet2d(n_proc=2, channels_per_proc=1, hidden=hidden)
+    elif architechture == "unet1d":
+        encoding_net = BezierEncodingNet1d(n_proc=2, channels_per_proc=1, hidden=hidden)
+    else:
+        raise ValueError(f"No BezierEncodingNet defined for arch '{architechture}'")
+
+    return CoupledFlowBezier(
+        arch=arch,
+        args=args,
+        net1_configs=n1_configs,
+        net2_configs=n2_configs,
+        encoding_net=encoding_net,
+    )
+
+
 def instantiate_coupled_bz_model(args) -> nn.Module:
     """Instantiate CoupledFlowBZ (3-process) for BZ training. Separate from instantiate_coupled_model."""
     from models.coupled_flow_bz import CoupledFlowBZ
