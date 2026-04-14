@@ -246,6 +246,11 @@ def train_bezier_one_epoch(
             synchronize_gradients(model)
             optimizer.step()
 
+        loss_value = loss.item()
+        if not math.isfinite(loss_value):
+            raise ValueError(f"Loss is {loss_value}, stopping training")
+        batch_loss.update(loss_value)
+
         model_without_ddp.update_ema()
 
         toc = time.time()
