@@ -6,7 +6,7 @@
 #SBATCH --cpus-per-task=4
 #SBATCH --gres=gpu:1
 #SBATCH --mem=16G
-#SBATCH --time=01:00:00
+#SBATCH --time=04:00:00
 #SBATCH --output=%x_%j.out
 #SBATCH --error=%x_%j.err
 
@@ -29,8 +29,8 @@ python bezier_coupled_training.py \
     --val_ratio=0.15 \
     --arch=unet32 \
     --batch_size=8 \
-    --lr=0.0006 \
-    --phi_lr=0.0002 \
+    --lr=0.0001 \
+    --phi_lr=0.00005 \
     --epochs=100 \
     --warmup_epochs=20 \
     --eval_frequency=10 \
@@ -49,4 +49,5 @@ python bezier_coupled_training.py \
     --bezier_hidden=32 \
     --num_workers=4 \
     --pin_mem \
+    --meta_grad \
     --auto_resume

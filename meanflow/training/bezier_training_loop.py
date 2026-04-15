@@ -131,13 +131,24 @@ def train_bezier_meta_step(model_without_ddp, optimizer,
         local_loss, theta_params, create_graph=True, allow_unused=True,
     )
 
-    # ── Virtual θ̃ = θ - η · ∇_θ L_local  (in-graph) ─────────────────────────
+    # ── Clip ∇_θ L_local (in-graph) before building θ̃ ───────────────────────
+    # Scale by 1/norm (clamped to 1) so the virtual step is at most theta_lr.
+    # Scaling in-graph preserves the meta-chain: global_loss → θ̃ →
+    # (scale * theta_grads_local) → L_local → z_t(φ) → φ.
+    _valid = [g for g in theta_grads_local if g is not None]
+    if _valid:
+        _total_norm = torch.stack([g.norm() for g in _valid]).norm()
+        _scale = (1.0 / (_total_norm + 1e-6)).clamp(max=1.0)
+    else:
+        _scale = 1.0
+
+    # ── Virtual θ̃ = θ - η · scale · ∇_θ L_local  (in-graph) ─────────────────
     net1_tilde = {
-        k: p - theta_lr * g if g is not None else p
+        k: p - theta_lr * _scale * g if g is not None else p
         for (k, p), g in zip(net1_named.items(), theta_grads_local[:n1])
     }
     net2_tilde = {
-        k: p - theta_lr * g if g is not None else p
+        k: p - theta_lr * _scale * g if g is not None else p
         for (k, p), g in zip(net2_named.items(), theta_grads_local[n1:])
     }
 
@@ -193,6 +204,9 @@ def train_bezier_meta_step(model_without_ddp, optimizer,
     # φ: ∇_φ L_global(θ̃) via eq. 32
     for p, g in zip(phi_params, phi_grads):
         p.grad = g.detach().clone() if g is not None else None
+
+    # Clip final gradients before optimizer step (max_norm=1.0)
+    torch.nn.utils.clip_grad_norm_(theta_params + phi_params, max_norm=1.0)
 
     optimizer.step()
 
