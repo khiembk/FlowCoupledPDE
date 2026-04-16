@@ -109,9 +109,24 @@ Data loaders live in `meanflow/data_loaders/`. The baselines script adds this to
 
 **Datasets supported in `meanflow/train_coupled.py`:** `grayscott`, `lv`. MPF data works with `--dataset=grayscott` since both have the same `[N_traj, N_env, 2, T, 64, 64]` format.
 
-**Datasets supported in `baselines/train_baseline.py`:** `grayscott`, `lv`, `multiphase` (reuses grayscott loader).
+**Datasets supported in `baselines/train_baseline.py`:** `grayscott`, `lv`, `multiphase` (reuses grayscott loader), `bz` (`bz_loader.py`, 3-process 1D), `thm` (`thm_loader.py`, 5-process 2D, use `--n_proc 5`).
 
-**BZ and THM** have data generators and slurm scripts but are **not yet integrated** into `train_coupled.py` or `train_baseline.py`. Doing so would require new data loaders, and updating `COUPLED_CONFIGS` for BZ (3-process 1D) and THM (5-channel 2D).
+**BZ and THM** are integrated in baselines but **not yet in `train_coupled.py`**. Adding them to the coupled flow trainer would require new loaders and updating `COUPLED_CONFIGS` for BZ (3-process 1D) and THM (5-channel 2D).
+
+### Bezier Coupled Flow (`meanflow/bezier_coupled_training.py`)
+
+An alternative to CoupledFlow that parameterizes trajectories as quadratic Bezier curves:
+```
+z_t = (1-t)z^0 + t*z^1 + t(t-1)*φ
+v_t = (z^1 - z^0) + (2t-1)*φ
+```
+where `φ` is a learned control point produced by `BezierEncodingNet` (`meanflow/models/bezier_coupled_flow.py`). The model class is `CoupledFlowBezier`; training uses `bezier_coupled_training.py` with the same arg parser as the coupled flow trainer plus `--phi_lr`, `--bezier_hidden`, and `--meta_grad`.
+
+**`--meta_grad`** implements Algorithm 1 eq. 32: φ is updated via meta-gradient `∇_φ L_global(θ̃)` using `create_graph=True` + `functional_call`. Without `--meta_grad`, φ receives gradient directly through `z_t(φ)` in the local loss (simpler and more stable).
+
+**`unet32` arch**: a 32×32 spatial resolution config (for small/toy datasets), added alongside `unet` (64×64) and `unet1d`. Set via `--arch unet32`.
+
+**Known issue**: when `forward_global_loss` uses a straight-line target `v = source - target` (no φ), the only gradient path to φ is through the Hessian `∂²L_local/∂θ∂φ`, which is numerically unstable at init. Fix: include φ in the global loss target — at t=1, true Bezier velocity is `v¹ = (z^0 - z^1) + φ`.
 
 ### Baseline Models (`baselines/models/`)
 
@@ -126,7 +141,7 @@ Six neural operator baselines, each with 1D and 2D variants:
 | `cmwno2d` / `cmwno1d` | `cmwno.py` |
 | `compol2d` / `compol1d` | `compol.py` |
 
-All models receive `in_channels = n_proc * channels_per_proc` (processes concatenated). `--n_proc 2` for all current 2-process systems. `compol2d/1d` additionally takes `--aggr_type atn|rnn` and `--n_heads`.
+All models receive `in_channels = n_proc * channels_per_proc` (processes concatenated). Use `--n_proc 2` for GS/LV/MPF, `--n_proc 3` for BZ, `--n_proc 5` for THM. `compol2d/1d` additionally takes `--aggr_type atn|rnn` and `--n_heads`. DeepONet requires `--epochs 10000` (paper setting); 500 epochs is insufficient.
 
 ### Supported PDE Systems
 
@@ -134,9 +149,9 @@ All models receive `in_channels = n_proc * channels_per_proc` (processes concate
 |---|---|---|---|---|---|
 | `gs` | `gs_{N}.pt` | 2D, 64×64 | 2 (u, v) | 1 | Yes — **block IC + T_warmup=200 burn-in + T_pred=20** |
 | `lv` | `lv_{N}.pt` | 1D, len=256 | 2 (u, v) | 1 | Yes |
-| `bz` | `bz_{N}.pt` | 1D, len=256 | 3 (u, v, w) | 1 | Data only |
+| `bz` | `bz_{N}.pt` | 1D, len=256 | 3 (u, v, w) | 1 | Baselines only (`--dataset bz --n_proc 3`) |
 | `mpf` | `mpf_{N}.pt` | 2D, 64×64 | 2 (Sw, P) | 3 | Via `--dataset=grayscott` |
-| `thm` | `thm_{N}.pt` | 2D, 64×64 | 5 (T, p, ε_xx, ε_yy, ε_xy) | 1 | Data only |
+| `thm` | `thm_{N}.pt` | 2D, 64×64 | 5 (T, p, ε_xx, ε_yy, ε_xy) | 1 | Baselines only (`--dataset thm --n_proc 5`) |
 
 ### Key CLI Flags
 
