@@ -72,6 +72,23 @@ COUPLED_CONFIGS = {
         "channel_mult_noise": 2,
         "embedding_type":     "positional",
     },
+    # Lightweight 2D UNet for large N-process systems (e.g., THM 5-process).
+    # model_channels=64, channel_mult=[1,2,2], num_blocks=2 → ~6M params per net
+    # vs ~50M for "unet"; 5 such nets ≈ 30M trainable params total.
+    # in_channels is overridden to n_proc at instantiation time.
+    "unet_lite": {
+        "img_resolution": 64,
+        "in_channels": 2,
+        "out_channels": 1,
+        "model_channels": 64,
+        "channel_mult_noise": 1,
+        "resample_filter": [1, 1],
+        "channel_mult": [1, 2, 2],
+        "num_blocks": 2,
+        "encoder_type": "standard",
+        "decoder_type": "standard",
+        "use_checkpoint": True,
+    },
     # BZ: 3-process 1D system — used by CoupledFlowBZ (separate from CoupledFlow)
     "unet1d_bz": {
         "seq_len":            256,
@@ -147,6 +164,21 @@ def instantiate_bezier_coupled_model(args) -> nn.Module:
         net2_configs=n2_configs,
         encoding_net=encoding_net,
     )
+
+
+def instantiate_coupled_nproc_model(args, n_proc: int) -> nn.Module:
+    """
+    Instantiate CoupledFlowNProc for n_proc processes using the unet_lite arch.
+    Each net receives all n_proc channels concatenated (in_channels=n_proc).
+    """
+    from models.coupled_flow_nproc import CoupledFlowNProc
+
+    cfg = copy.deepcopy(COUPLED_CONFIGS["unet_lite"])
+    cfg["in_channels"] = n_proc
+    cfg["dropout"] = args.dropout
+
+    net_configs_list = [copy.deepcopy(cfg) for _ in range(n_proc)]
+    return CoupledFlowNProc(arch=SongUNet, args=args, net_configs_list=net_configs_list)
 
 
 def instantiate_coupled_bz_model(args) -> nn.Module:
