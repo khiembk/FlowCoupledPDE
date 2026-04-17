@@ -433,52 +433,53 @@ class CMWNO2d(nn.Module):
         padding: int = 0,
     ):
         super().__init__()
-        assert n_proc == 2, "CMWNO requires exactly 2 coupled processes"
         self.in_channels = in_channels
+        self.n_proc = n_proc
         self.padding = padding
         c = max(1, width // k)
 
-        # Row-wise coupled pair (operates along W)
-        self.net1_row = MWT(ich=in_channels, k=k, alpha=alpha, c=c, nCZ=n_layers, L=L)
-        self.net2_row = MWT(ich=in_channels, k=k, alpha=alpha, c=c, nCZ=n_layers, L=L)
-        # Column-wise coupled pair (operates along H; input is 1-channel from row stage)
-        self.net1_col = MWT(ich=1, k=k, alpha=alpha, c=c, nCZ=n_layers, L=L)
-        self.net2_col = MWT(ich=1, k=k, alpha=alpha, c=c, nCZ=n_layers, L=L)
+        # Row-wise coupled nets (operate along W), one per process
+        self.nets_row = nn.ModuleList([
+            MWT(ich=in_channels, k=k, alpha=alpha, c=c, nCZ=n_layers, L=L)
+            for _ in range(n_proc)
+        ])
+        # Column-wise coupled nets (operate along H; input is 1-channel from row stage)
+        self.nets_col = nn.ModuleList([
+            MWT(ich=1, k=k, alpha=alpha, c=c, nCZ=n_layers, L=L)
+            for _ in range(n_proc)
+        ])
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        # x: [B, 2*C, H, W]
+        # x: [B, n_proc*C, H, W]
         B, _, H, W = x.shape
         C = self.in_channels
-        x1 = x[:, :C]      # [B, C, H, W]
-        x2 = x[:, C:2*C]
+        xs = [x[:, i*C:(i+1)*C] for i in range(self.n_proc)]   # each [B, C, H, W]
 
         if self.padding > 0:
-            x1 = F.pad(x1, [0, self.padding, 0, self.padding])
-            x2 = F.pad(x2, [0, self.padding, 0, self.padding])
-        Hp, Wp = x1.shape[2], x1.shape[3]
+            xs = [F.pad(xi, [0, self.padding, 0, self.padding]) for xi in xs]
+        Hp, Wp = xs[0].shape[2], xs[0].shape[3]
 
         # ── Row transform (along W) ──────────────────────────────────────────
-        # reshape to [B*H, W, C] for MWT
-        x1r = x1.permute(0, 2, 1, 3).reshape(B * Hp, C, Wp).permute(0, 2, 1)
-        x2r = x2.permute(0, 2, 1, 3).reshape(B * Hp, C, Wp).permute(0, 2, 1)
-
-        o1r, o2r = _coupled_forward_1d(x1r, x2r, self.net1_row, self.net2_row)
-        # o: [B*H, W, 1] → [B, 1, H, W]
-        o1r = o1r.permute(0, 2, 1).reshape(B, Hp, 1, Wp).permute(0, 2, 1, 3)
-        o2r = o2r.permute(0, 2, 1).reshape(B, Hp, 1, Wp).permute(0, 2, 1, 3)
+        # reshape each to [B*H, W, C] for MWT
+        xsr = [xi.permute(0, 2, 1, 3).reshape(B * Hp, C, Wp).permute(0, 2, 1) for xi in xs]
+        if self.n_proc == 2:
+            ors = list(_coupled_forward_1d(xsr[0], xsr[1], self.nets_row[0], self.nets_row[1]))
+        else:
+            ors = _coupled_forward_Nd(xsr, list(self.nets_row))
+        # each o: [B*H, W, 1] → [B, 1, H, W]
+        ors = [o.permute(0, 2, 1).reshape(B, Hp, 1, Wp).permute(0, 2, 1, 3) for o in ors]
 
         # ── Column transform (along H) ───────────────────────────────────────
-        # reshape to [B*W, H, 1] for MWT
-        x1c = o1r.permute(0, 3, 1, 2).reshape(B * Wp, 1, Hp).permute(0, 2, 1)
-        x2c = o2r.permute(0, 3, 1, 2).reshape(B * Wp, 1, Hp).permute(0, 2, 1)
-
-        o1c, o2c = _coupled_forward_1d(x1c, x2c, self.net1_col, self.net2_col)
-        # o: [B*W, H, 1] → [B, 1, H, W]
-        o1 = o1c.permute(0, 2, 1).reshape(B, Wp, 1, Hp).permute(0, 2, 3, 1)
-        o2 = o2c.permute(0, 2, 1).reshape(B, Wp, 1, Hp).permute(0, 2, 3, 1)
+        # reshape each to [B*W, H, 1] for MWT
+        xsc = [o.permute(0, 3, 1, 2).reshape(B * Wp, 1, Hp).permute(0, 2, 1) for o in ors]
+        if self.n_proc == 2:
+            ocs = list(_coupled_forward_1d(xsc[0], xsc[1], self.nets_col[0], self.nets_col[1]))
+        else:
+            ocs = _coupled_forward_Nd(xsc, list(self.nets_col))
+        # each o: [B*W, H, 1] → [B, 1, H, W]
+        ocs = [o.permute(0, 2, 1).reshape(B, Wp, 1, Hp).permute(0, 2, 3, 1) for o in ocs]
 
         if self.padding > 0:
-            o1 = o1[:, :, :H, :W]
-            o2 = o2[:, :, :H, :W]
+            ocs = [o[:, :, :H, :W] for o in ocs]
 
-        return torch.cat([o1, o2], dim=1)   # [B, 2, H, W]
+        return torch.cat(ocs, dim=1)   # [B, n_proc, H, W]
