@@ -6,9 +6,11 @@ from models.unet import SongUNet
 from models.unet1d import SongUNet1d
 
 MODEL_ARCHS = {
-    "unet":   SongUNet,
-    "unet32": SongUNet,
-    "unet1d": SongUNet1d,
+    "unet":       SongUNet,
+    "unet32":     SongUNet,
+    "unet32_lite": SongUNet,
+    "unet_lite":  SongUNet,
+    "unet1d":     SongUNet1d,
 }
 
 # Configs for single-process MeanFlow model
@@ -57,6 +59,20 @@ COUPLED_CONFIGS = {
         "channel_mult_noise": 2,
         "resample_filter": [1, 3, 3, 1],
         "channel_mult": [2, 2, 2],
+        "encoder_type": "standard",
+        "decoder_type": "standard",
+        "use_checkpoint": False,
+    },
+    # Lightweight 32×32 variant (~5M params/net) for tiny 2-process datasets.
+    "unet32_lite": {
+        "img_resolution": 32,
+        "in_channels": 2,
+        "out_channels": 1,
+        "model_channels": 64,
+        "channel_mult_noise": 1,
+        "resample_filter": [1, 1],
+        "channel_mult": [1, 2, 2],
+        "num_blocks": 2,
         "encoder_type": "standard",
         "decoder_type": "standard",
         "use_checkpoint": False,
