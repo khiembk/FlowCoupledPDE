@@ -36,6 +36,7 @@ def get_args_parser():
     parser.add_argument("--seed", default=0, type=int)
     parser.add_argument("--resume", default="", help="resume from checkpoint (path to .pth file)")
     parser.add_argument("--auto_resume", action="store_true", help="automatically resume from checkpoint-last.pth in output_dir if it exists")
+    parser.add_argument("--reset_optimizer", action="store_true", help="when resuming, load model weights only — reset optimizer and lr_schedule to use current --lr")
 
     parser.add_argument("--start_epoch", default=0, type=int, metavar="N", help="start epoch (used when resumed from checkpoint)")
     parser.add_argument("--eval_only", action="store_true", help="No training, only run evaluation")

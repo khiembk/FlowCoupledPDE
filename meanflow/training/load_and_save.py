@@ -52,8 +52,11 @@ def load_model(args, model_without_ddp, optimizer, lr_schedule):
             and "epoch" in checkpoint
             and not args.eval_only
         ):
-            optimizer.load_state_dict(checkpoint["optimizer"])
-            lr_schedule.load_state_dict(checkpoint["lr_schedule"])
             args.start_epoch = checkpoint["epoch"] + 1
             logging.info(f"Start epoch set to {args.start_epoch}")
-            logging.info("With optim & sched!")
+            if getattr(args, "reset_optimizer", False):
+                logging.info("reset_optimizer=True: skipping optimizer/lr_schedule restore, using current --lr")
+            else:
+                optimizer.load_state_dict(checkpoint["optimizer"])
+                lr_schedule.load_state_dict(checkpoint["lr_schedule"])
+                logging.info("With optim & sched!")
