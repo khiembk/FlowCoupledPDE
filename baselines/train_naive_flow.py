@@ -206,17 +206,9 @@ def train_one_epoch(model, loader, optimizer, scheduler, device, epoch, args,
 
         optimizer.zero_grad(set_to_none=True)
 
-        if args.seq_loss:
-            # Two separate backward passes — halves peak activation memory.
-            local_loss = model.forward_local_loss(sources, targets)
-            local_loss.backward()
-            global_loss = model.forward_global_loss(sources, targets)
-            global_loss.backward()
-            loss_val = (local_loss + global_loss).detach().item()
-        else:
-            loss = model.forward_combined_loss(sources, targets)
-            loss.backward()
-            loss_val = loss.detach().item()
+        loss = model.forward_loss(sources, targets)
+        loss.backward()
+        loss_val = loss.detach().item()
 
         if not math.isfinite(loss_val):
             raise ValueError(f"Loss is {loss_val}, stopping training.")
@@ -321,9 +313,6 @@ def get_args():
     p.add_argument("--weight_decay",   type=float, default=0.0)
     p.add_argument("--grad_clip",      type=float, default=1.0,
                    help="Max gradient norm (0 = disabled).")
-    p.add_argument("--seq_loss", action="store_true",
-                   help="Separate backward passes for local and global losses "
-                        "(halves peak activation memory).")
     p.add_argument("--num_workers", type=int, default=4)
     p.add_argument("--seed",        type=int, default=42)
     p.add_argument("--device",      default="cuda")

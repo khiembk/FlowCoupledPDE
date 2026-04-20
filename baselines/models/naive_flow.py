@@ -183,32 +183,9 @@ class NaiveMeanFlow(nn.Module):
             total = total + self._local_loss_one_process(i, z_t_i, v_t_i, t_b, r_b)
         return total
 
-    def forward_global_loss(self, sources, targets):
-        """Global MeanFlow loss at t=1, r=0 for all processes independently."""
-        bsz = sources[0].shape[0]
-        device = sources[0].device
-        dtype = sources[0].dtype
-
-        t1 = torch.ones(bsz, device=device, dtype=dtype)
-        r0 = torch.zeros(bsz, device=device, dtype=dtype)
-        t1_b = self._expand_time_like(t1, sources[0])
-        r0_b = self._expand_time_like(r0, sources[0])
-
-        total = sources[0].new_zeros(())
-        for i in range(1, self.n_proc + 1):
-            src, tgt = sources[i - 1], targets[i - 1]
-            net = self._modules[f"net{i}"]
-            v_global = src - tgt
-            u = self._u_i(src, t1_b, r0_b, net=net)
-            sq = ((u - v_global) ** 2).flatten(1).sum(dim=1)
-            total = total + self._adaptive_reduce(sq)
-        return total
-
-    def forward_combined_loss(self, sources, targets):
-        return (
-            self.forward_local_loss(sources, targets)
-            + self.forward_global_loss(sources, targets)
-        )
+    def forward_loss(self, sources, targets):
+        """Training loss: local MeanFlow only (no global loss)."""
+        return self.forward_local_loss(sources, targets)
 
     # ------------------------------------------------------------------ #
     # Inference
