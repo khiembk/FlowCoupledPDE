@@ -155,15 +155,50 @@ def split_batch(batch, n_proc):
     return sources, targets
 
 
+# ── per-process normaliser ────────────────────────────────────────────────────
+
+class Normalizer:
+    """
+    Per-process z-score normalizer computed from one pass over the training loader.
+    Fixes training instability when data has large values / step differences (e.g. LV, BZ).
+    """
+    def __init__(self, loader, n_proc, device):
+        sums      = [0.0] * n_proc
+        sq_sums   = [0.0] * n_proc
+        counts    = [0]   * n_proc
+        for batch in loader:
+            for i in range(n_proc):
+                x = batch[i].float()
+                sums[i]    += x.sum().item()
+                sq_sums[i] += (x ** 2).sum().item()
+                counts[i]  += x.numel()
+        means = [s / c for s, c in zip(sums, counts)]
+        stds  = [max((sq / c - m ** 2) ** 0.5, 1e-8)
+                 for sq, c, m in zip(sq_sums, counts, means)]
+        self.means = torch.tensor(means, dtype=torch.float32, device=device)
+        self.stds  = torch.tensor(stds,  dtype=torch.float32, device=device)
+        logger.info(
+            "Normalizer stats: "
+            + "  ".join(f"proc{i+1} mean={means[i]:.4f} std={stds[i]:.4f}"
+                        for i in range(n_proc))
+        )
+
+    def normalize(self, tensors):
+        return [(t - self.means[i]) / self.stds[i] for i, t in enumerate(tensors)]
+
+    def denormalize(self, tensors):
+        return [t * self.stds[i] + self.means[i] for i, t in enumerate(tensors)]
+
+
 # ── evaluation ────────────────────────────────────────────────────────────────
 
 @torch.no_grad()
-def evaluate(model, loader, device, nets=None, args=None):
+def evaluate(model, loader, device, nets=None, args=None, normalizer=None):
     """
-    Compute per-process and average relative L2 error.
+    Compute per-process and average relative L2 error in the original data space.
 
-    Args:
-        nets: list of N networks to use for sampling; None → primary EMA nets.
+    If normalizer is provided, inputs are normalized before the model and
+    predictions are denormalized before computing rel-L2.
     """
     model.eval()
     n_proc = model.n_proc
@@ -173,7 +208,12 @@ def evaluate(model, loader, device, nets=None, args=None):
     for batch in loader:
         batch = [x.to(device, non_blocking=True) for x in batch]
         sources, targets = split_batch(batch, n_proc)
-        preds = model.sample(sources, nets=nets)
+
+        model_sources = normalizer.normalize(sources) if normalizer else sources
+        preds = model.sample(model_sources, nets=nets)
+        if normalizer:
+            preds = normalizer.denormalize(preds)
+
         for i in range(n_proc):
             nums[i] += ((preds[i] - targets[i]) ** 2).sum().item()
             dens[i] += (targets[i] ** 2).sum().item()
@@ -191,7 +231,7 @@ def evaluate(model, loader, device, nets=None, args=None):
 # ── training loop ─────────────────────────────────────────────────────────────
 
 def train_one_epoch(model, loader, optimizer, scheduler, device, epoch, args,
-                    log_writer, trainable_params):
+                    log_writer, trainable_params, normalizer=None):
     model.train()
     n_proc = model.n_proc
     total_loss = 0.0
@@ -203,6 +243,10 @@ def train_one_epoch(model, loader, optimizer, scheduler, device, epoch, args,
 
         batch = [x.to(device, non_blocking=True) for x in batch]
         sources, targets = split_batch(batch, n_proc)
+
+        if normalizer is not None:
+            sources = normalizer.normalize(sources)
+            targets = normalizer.normalize(targets)
 
         optimizer.zero_grad(set_to_none=True)
 
@@ -330,6 +374,8 @@ def get_args():
     p.add_argument("--eval_only",  action="store_true")
     p.add_argument("--test_run",   action="store_true",
                    help="Run one batch only (debugging).")
+    p.add_argument("--normalize",  action="store_true",
+                   help="Apply per-process z-score normalisation (recommended for LV/BZ).")
 
     return p.parse_args()
 
@@ -404,13 +450,19 @@ def main():
     # ── resume ───────────────────────────────────────────────────────────────
     start_epoch = load_checkpoint(model, optimizer, scheduler, args)
 
+    # ── normaliser ───────────────────────────────────────────────────────────
+    normalizer = None
+    if getattr(args, "normalize", False):
+        logger.info("Building per-process normalizer from training data …")
+        normalizer = Normalizer(train_loader, args.n_proc, device)
+
     # ── tensorboard ──────────────────────────────────────────────────────────
     log_writer = SummaryWriter(log_dir=args.output_dir)
 
     # ── eval only ────────────────────────────────────────────────────────────
     if args.eval_only:
         _run_eval(model, test_loader, device, args, log_writer, epoch=start_epoch - 1,
-                  split="test")
+                  split="test", normalizer=normalizer)
         return
 
     # ── training loop ────────────────────────────────────────────────────────
@@ -420,11 +472,13 @@ def main():
         train_one_epoch(
             model, train_loader, optimizer, scheduler,
             device, epoch, args, log_writer, trainable_params,
+            normalizer=normalizer,
         )
 
         if (epoch + 1) % args.eval_frequency == 0 or epoch == args.epochs - 1:
             save_checkpoint(model, optimizer, scheduler, epoch, args)
-            _run_eval(model, test_loader, device, args, log_writer, epoch, split="test")
+            _run_eval(model, test_loader, device, args, log_writer, epoch, split="test",
+                      normalizer=normalizer)
 
         if args.test_run:
             break
@@ -436,14 +490,15 @@ def main():
         model.load_state_dict(ckpt["model"], strict=False)
         logger.info("Loaded last checkpoint for final evaluation.")
 
-    _run_eval(model, test_loader, device, args, log_writer, args.epochs, split="test (final)")
+    _run_eval(model, test_loader, device, args, log_writer, args.epochs, split="test (final)",
+              normalizer=normalizer)
 
     elapsed = str(datetime.timedelta(seconds=int(time.time() - start_time)))
     logger.info(f"Total training time: {elapsed}")
     log_writer.close()
 
 
-def _run_eval(model, loader, device, args, log_writer, epoch, split="test"):
+def _run_eval(model, loader, device, args, log_writer, epoch, split="test", normalizer=None):
     """Evaluate all EMA variants and log results."""
     n_proc = model.n_proc
 
@@ -459,7 +514,7 @@ def _run_eval(model, loader, device, args, log_writer, epoch, split="test"):
         ))
 
     for suffix, nets in eval_variants:
-        metrics = evaluate(model, loader, device, nets=nets, args=args)
+        metrics = evaluate(model, loader, device, nets=nets, args=args, normalizer=normalizer)
         per_proc = "  ".join(
             f"p{i + 1}={metrics[f'rel_l2_{i + 1}']:.6f}" for i in range(n_proc)
         )

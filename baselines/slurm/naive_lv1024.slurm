@@ -45,4 +45,5 @@ python train_naive_flow.py \
     --norm_eps 1e-3 \
     --num_workers 4 \
     --log_per_step 100 \
+    --normalize \
     --auto_resume
