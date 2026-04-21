@@ -62,6 +62,15 @@
 \usepackage{xcolor}         % colors
 \usepackage{algorithm} % For algorithm environment
 \usepackage{algorithmic}
+\usepackage{multirow}
+\usepackage{amsthm}
+
+% Define the assumption style
+\newtheorem{assumption}{Assumption}
+\newtheorem{theorem}{Theorem}
+\newtheorem{lemma}[theorem]{Lemma}
+\newtheorem{corollary}[theorem]{Corollary}
+\newtheorem{proposition}[theorem]{Proposition}
 % Note. For the workshop paper template, both \title{} and \workshoptitle{} are required, with the former indicating the paper title shown in the title and the latter indicating the workshop title displayed in the footnote. 
 \title{Flow-based Framework Solving Multiple Processes PDEs}
 
@@ -118,6 +127,7 @@
 \section{Related Works}
 [TODO]
 \section{Method}
+\label{sec:method}
 \subsection{Problem Setting}
 In this section, we provide a simple example of the coupled processes system as well as the multiple processes system. We begin with the coupled processes system with coupled kernels $\kappa_1$ and $\kappa_2$, coupled variable $v_1(x, t)$ and $v_2(x, t)$ given initial condition $v_1(x, 0)$ and $v_2(x, 0)$. Given $\mathcal{U}$ and $\mathcal{A}$ as the initial condition space and the prediction space, let $T$ denote the generic operator such that $T: \mathcal{U} \to \mathcal{A}$. Without the knowledge of how these two variables are coupled, to solve for $v_1(x, \tau)$ and $v_2(x, \tau)$, we need two operator $T_1$ and $T_2$ such that 
 \begin{equation}
@@ -137,20 +147,21 @@ Using the above formulations, we can easily extend to the multiple-process syste
 \begin{equation}
     v_i(x, \tau) = T_i[v_1(x, 0), ...,v_n(x, 0); \kappa_1,..., \kappa_n]
 \end{equation}
-Our idea is to model each process operator $T_i$ by a flow model $\Psi_i$ with average velocity field from $r$ to $t$ as $u^{\theta}_i(z^t_1,..z^t_n; r,t )$, with variable $z^t_i$ as immediate representation of flow $i$-th at time $t \in[0,1]$, such that 
+Our idea is to model each process operator $T_i$ by a flow model $\Psi_i$ with average velocity field from $r$ to $t$ as $u^{\theta}_i(z^t_1,..z^t_n; r,t )$, where we let $z^t_i (\cdot)$ denote the \emph{flow-matching state} at denoising time $t \in (0,1)$ of the physical process $i$-th such that the endpoints correspond to its initial and final physical time:  
+% as immediate representation of flow $i$-th at time $t \in[0,1]$, such that 
 \begin{equation}
     z^1_i(x) = v_i(x, 0)
 \end{equation}
 \begin{equation}
-    z^0_i(x) = v_i(x, \tau) 
+    z^0_i(x) = v_i(x, \tau). 
 \end{equation}
-Then, the ground truth (target) average velocity from $0$ to $1$ with $i-$th process as: 
+Following standard flow matching, we define the regression target average velocity from flow matching time $0$ to $1$ of the $i-$th process as: 
 \begin{equation}
     u_i^{\text{tar}}(z^1_1(x),..z^1_n(x); 0,1 ) = v_i(x, 0) -  v_i(x, \tau) \label{eq:global_tar_velocity}
 \end{equation}
 \subsection{Average Velocity with Coupled PDEs Processes}
 \label{sec:average_velocity_couple}
-In this section, we first derive the ground truth average velocity fields in the setting of two processes $v_1(x, t)$ and $v_2(x, t)$ as \citep{geng2025mean}. Let $u^{\text{ins}}_1(z^t_1(x), z^t_2(x), t )$ and $u^{\text{ins}}_2(z^t_1(x), z^t_2(x), t )$ as instant velocity at time $t$, we have the average velocity field from $r$ to $t$ as 
+In this section, we first derive the ground truth average velocity fields in the setting of two processes $v_1(x, t)$ and $v_2(x, t)$ as \citep{geng2025mean}. Let $u^{\text{ins}}_i(z^t_1(x), z^t_2(x), t )$ be instant velocity at time $t$ of process $i$-th, we have the average velocity $u_1$ from $r$ to $t$ as 
 \begin{equation}
     (t- r) u_1(z^t_1(x), z^t_2(x), r, t) = \int_{r}^t u^{\text{ins}}_1(z^\tau_1(x), z^\tau_2(x), \tau ) d\tau
 \end{equation}
@@ -181,17 +192,20 @@ with the time derivative of the average velocity $u_i(z^t_1(x),.., z^t_n(x), r, 
 \end{align}
 
 \subsection{Model Instant Velocity Field using Gaussian Process}
-In Section~\ref{sec:average_velocity_couple} and Section~\ref{sec:avergae_velocity_multiple}, we provided the analysis to compute the ground truth average velocity field in both coupled processes and multiple processes settings. However, we still need to estimate the instant velocity field $u^{\text{ins}}_i$ to compute the target average velocity effectively. In this section, we introduce the framework to compute this instant velocity based on the Gaussian Process~\cite{Rasmussen2006Gaussian} in both coupled processes (Section~\ref{sec:Gaussian_coupled}) and multiple processes settings (Section~\ref{sec:Gaussian_multiple}).
+In Section~\ref{sec:average_velocity_couple} and Section~\ref{sec:avergae_velocity_multiple}, we provided the analysis to compute the ground truth average velocity field in coupled processes and multiple processes settings. However, we still need to estimate the instant velocity field $u^{\text{ins}}_i$ to compute the target average velocity effectively. In this section, we introduce the framework to compute this instant velocity based on the Gaussian Process~\cite{Rasmussen2006Gaussian} in both coupled processes (Section~\ref{sec:Gaussian_coupled}) and multiple processes settings (Section~\ref{sec:Gaussian_multiple}).
 
 \subsubsection{Coupled PDE setting}
 \label{sec:Gaussian_coupled}
-In this section, we will provide the analysis in the coupled PDEs setting, where there are only two processes $v_1$ and $v_2$ that interact with each other. Formally, we have the dataset that only includes the initial condition $v_i(x,0)$ and status $v_i(x, \tau)$ in time $\tau$. We model the dependence between two random variables $v_1$ and $v_2$ and time $t$ using Gaussian Process, such that, changing the timescale to flow-based $[0, 1]$, we have the $N$ training pairs $\{(0, z^0_1(x)); z^0_2(x)\}$ and $\{(1, z^1_1(x)); z^1_2(x)\}$. The Gaussian process \citep{Rasmussen2006Gaussian} models the joint distribution between any finite number of random variables as a joint Gaussian distribution. We denote $\mathrm{y}$ as $z_2$, $\mathrm{x}$ as vector of  $(t, z_1) \in \mathcal{X} \subset \mathbb{R}^{d+1}$, $\mathrm{y} = f(\mathrm{x}) \in \mathbb{R}^d$, and learn a vector-valued GP~\citep{alvarez2012kernelsvectorvaluedfunctionsreview}, such that:
+In this section, we will provide the analysis in the coupled PDEs setting, where there are only two processes $v_1$ and $v_2$ that interact with each other. Formally, we have the dataset that only includes the initial condition $v_i(x,0)$ and the solution $v_i(x, \tau)$ at time $\tau$. We model the dependence between two random variables $v_1$ and $v_2$ and time $t$ using Gaussian Process, such that, changing the timescale to flow-based $[0, 1]$, we have the $N$ training pairs $\{(0, z^0_1(x)); z^0_2(x)\}$ and $\{(1, z^1_1(x)); z^1_2(x)\}$. The Gaussian process \citep{Rasmussen2006Gaussian} models the joint distribution between any finite number of random variables as a joint Gaussian distribution. We denote $\mathrm{y}$ as $z_2$, $\mathrm{x}$ as vector of  $(t, z_1) \in \mathcal{X} \subset \mathbb{R}^{d+1}$, $\mathrm{y} = f(\mathrm{x}) \in \mathbb{R}^d$, and learn a vector-valued GP~\citep{alvarez2012kernelsvectorvaluedfunctionsreview}, such that:
 \begin{equation}
    \mathbf{f} \sim \mathcal{GP}(\mathbf{m}, \mathbf{K})
 \end{equation}
 where $\mathbf{m} \in \mathbb{R}^d$ is the mean function and $\mathbf{K}$ is a
-positive matrix valued function that $(\mathbf{K}(\mathrm{x},\mathrm{x}'))_{p,q}$ in the matrix $\mathbf{K}(\mathrm{x}, \mathrm{x}')$ correspond to
-the covariances between the outputs $f_p(\mathrm{x})$ and $f_q(\mathrm{x}')$, which are value of $f(\mathrm{x})$ and $f(\mathrm{x}')$ at dimension $p$ and $q$. For a set of inputs $\mathbf{X}$, the prior distribution over the vector $\mathbf{f}(X)$ is given by 
+positive semi-definite Gram 
+% matrix-valued 
+% function 
+such that the value $(\mathbf{K}(\mathrm{x},\mathrm{x}'))_{p,q}$ in the matrix $\mathbf{K}(\mathrm{x}, \mathrm{x}')$ corresponds to
+the covariance between the outputs $f_p(\mathrm{x})$ and $f_q(\mathrm{x}')$, which are value of $f(\mathrm{x})$ and $f(\mathrm{x}')$ at dimension $p$ and $q$. For a set of inputs $\mathbf{X}$, the prior distribution over the vector $\mathbf{f}(X)$ is given by 
 \begin{align}
     \mathbf{f}(X) \sim \mathcal{N}\big(\mathbf{m}(X), \mathbf{K}(X,X) \big)
 \end{align}
@@ -199,9 +213,11 @@ The predictive distribution for new vector $\mathrm{x}_{*}$ is
 \begin{align}
     \mathbf{f}(\mathrm{x}_{*}) \mid \mathbf{f}, \mathrm{x}_{*}, X \sim \mathcal{N} \big(\mathbf{f}_{*}(\mathrm{x}_{*}) , \mathbf{K}_{*}(\mathrm{x}_{*}, \mathrm{x}_{*})\big)
 \end{align}
-where $\mathbf{K}_{\mathrm{x}_*} \in \mathbb{R}^{d \times Nd}$ has entries $(\mathbf{K}(\mathrm{x}_{*}, \mathrm{x}_{j}))_{p,q}$ for $j \in [1,N]$ and $p,q \in [1, d]$ (see Appendix Section~\ref{appendix:GP_details} for implementation details). Thus, given new input $\mathrm{x}_{*} = (t, z_1)$, we can predict $z_2(\mathrm{x}_{*})$ as 
+where $\mathbf{K}_{\mathrm{x}_*} \in \mathbb{R}^{d \times Nd}$ has entries $(\mathbf{K}(\mathrm{x}_{*}, \mathrm{x}_{j}))_{p,q}$ for $j \in [1,N]$ and $p,q \in [1, d]$ (see Appendix Section~\ref{appendix:GP_details} for implementation details). Thus, given new input $\mathrm{x}_{*} = (t, z_1^*)$, we can predict 
+% $z_2(\mathrm{x}_{*})$
+$z_2^*$ as
 \begin{equation}
-    z_2 (\mathrm{x}_*) = \mathbf{f}_{*} (\mathrm{x}_{*}) \label{eq:infer_z}
+    z_2^* = \mathbf{f}_{*} (\mathrm{x}_{*}) \label{eq:infer_z}
 \end{equation}
 We can also compute the instant velocity of the random variable $z_2$ at time $t$ as 
 \begin{equation}
@@ -221,68 +237,12 @@ So that, given $\mathrm{x}_* =(t, z_1)$ we can sample the value of $z_2(\mathrm{
 Then, we can plug $\mathrm{x}_* =(t, z^t_1)$ into Eq.~\ref{eq:infer_z} and Eq.~\ref{eq:infer_velocity} to compute $z^t_2$ as well as its instant velocity field.
 \subsubsection{Multiple PDE setting}
 \label{sec:Gaussian_multiple}
-In this section, we will provide the analysis of multiple PDE settings, where there are $n$ processes $v_1, ..., v_n$ that interact with each other. To extend the coupled PDE setting to multiple PDE setting, the simple idea is to construct multiple GP mappings: $(t, z_i) \to z_j$ with $i,j \in [1,n]$ and $i \neq j$, and using the Dice Strategy to randomly decide the interaction order between processes. The main bottleneck of this approach is the computational cost, as we have to construct $n!$ GP mappings for $n$ processes. To address this problem, we propose a hybrid approach that combines the linear interpolant and GP mappings randomly in each time period $t$. For instance, we first sample time $t \sim U(0,1)$, then randomly select $\mathcal{A}(t) = \{i_{c},j_c \}^{k(t)}_{c= 1}$ interaction pairs set to construct $k(t)$ GP mappings. The leftover processes are inferred by the linear interpolants of time, such that
+In this section, we will provide the analysis of multiple PDE settings, where there are $n$ processes $v_1, ..., v_n$ that interact with each other. To extend the coupled PDE setting to multiple PDE setting, the simple idea is to construct multiple GP mappings: $(t, z_i) \to z_j$ with $i,j \in [1,n]$ and $i \neq j$, and using the Dice Strategy to randomly decide the interaction order between processes. Given each pair $(r, t)$, we randomly decide a driver process $i^*$, which interacts with other processes. We can sample the driven processes as 
 \begin{equation}
-    z^{t}_i = (1-t)z^{0}_i + t z^1_i
+    z^t_{i^*} = (1-t)z^0_{i^*} + t z^1_{i^*}
 \end{equation}
-\subsection{Model Instant Velocity Field using Bezier curve}
-Different from $\mathcal{GP}$ above, in this section, we provide another way to model the instant velocity field, which is inspired by the Bezier curve. We first denote the representation of all processes at time $t$ as $Z(t) = (z^t_1, z^t_2, ...,z^t_n )$. We then define the information encoding network, which encodes the information from other processes to process $i-$th as $\phi_i(t, Z(0), Z(1))$. This network received both information about time $t$ and the initial/end presentation point $Z(0), Z(1)$. Therefore, we can define the representation of each process at time $t$ as: 
-\begin{equation}
-    z^t_i = (1-t) z_i^0 + tz^1_i + t(t-1)\phi_i(t, Z(0), Z(1)) \label{eq:bezier_point}
-\end{equation}
-We then have the instant velocity field at time $t$ for each process as 
-\begin{equation}
-    v^t_i = \frac{d}{dt} \Big(z^t_i \Big) = (z^1_i - z^0_i) + (2t -1) \phi_i(t,Z(0),Z(1)) + (t^2 - t) \partial_t \phi_i(t, Z(0), Z(1)) \label{eq:bezier_velocity}
-\end{equation}
-Thus, we can plug Eq.~\ref{eq:bezier_point} and Eq.~\ref{eq:bezier_velocity} into Eq.~\ref{eq:target_def_average_multiple_velocity} to compute the ground truth (target) average velocity field, which is derived from its definition. Following the previous practice~\cite{geng2025mean}, to avoid double backpropagation, we apply a stop-gradient (sg) operator with respect to the flow model parameter $\theta$. We denote the target velocity field as $u^{\text{tar}}_i(Z(t), r, t, \phi)$ and introduce the local velocity loss as 
-\begin{equation}
-    \mathcal{L}^{i}_{\text{local}}(\theta, \phi, r, t) = \|u^{\theta}_i\big(Z(t), r,t\big) - u_i^{\text{tar}}(Z(t), r, t, \phi) \|^2_2 \label{eq:local_bezier_loss_i}
-\end{equation}
-For $n$ processes, we have the combined local loss as 
-\begin{equation}
-    \mathcal{L}_{\text{local}}(\theta, \phi, r, t) = \sum_{i=1}^{n}\mathcal{L}^{i}_{\text{local}}(\theta, \phi, r, t) \label{eq:local_bezier_loss}
-\end{equation}
-We then have the updated weight of the flow model by minimizing the local velocity loss with the learning rate $\eta$ as 
-\begin{equation}
-    \Tilde{\theta} = \theta - \eta \nabla_{\theta} \mathcal{L}_{\text{local}}(\theta, \phi, r,t) \label{eq:update_flow_weight_bezier}
-\end{equation}
-We use the updated weight $\Tilde{\theta}$ to compute the global velocity loss function as 
-\begin{align}
-    \mathcal{L}^{i}_{\text{global}}(\Tilde{\theta}) &= \|u^{\Tilde{\theta}}_i\big(Z(1), 0,1 \big) - (z^1_i - z^0_i)\|^2_2    \\
-    \mathcal{L}_{\text{global}}(\Tilde{\theta}) &= \sum_{i=1}^{n} \mathcal{L}^{i}_{\text{global}}(\Tilde{\theta}) \label{eq:global_bezier_loss}
-\end{align}
-Thus, we can update the information encoding weight $\phi$ via minimizing the global velocity loss function with the learning rate $\eta_1$, which can be expressed as
-\begin{equation}
-    \Tilde{\phi} = \phi - \eta_1 \nabla_{\phi} \mathcal{L}_{\text{global}}(\Tilde{\theta})
-\end{equation}
-where $\nabla_{\phi}\mathcal{L}_{\text{global}}(\Tilde{\theta})$ can be computed using chain rule as 
-\begin{equation}
-    \nabla_{\phi} \mathcal{L}_{\text{global}}(\Tilde{\theta}) = \nabla_{\Tilde{\theta}} \mathcal{L}_{\text{global}}(\Tilde{\theta}) \frac{\partial \Tilde{\theta}}{\partial \phi} = \eta \nabla_{\Tilde{\theta}} \mathcal{L}_{\text{global}}(\Tilde{\theta}) \partial_{\phi} \Big(\nabla_{\theta} \mathcal{L}_{\text{local}}(\theta, \phi, r,t) \Big)
-\end{equation}
-In that way, we can update the weight of the information encoding network as 
-\begin{equation}
-    \Tilde{\phi} = \phi - \eta_1\cdot \eta \nabla_{\Tilde{\theta}} \mathcal{L}_{\text{global}}(\Tilde{\theta}) \partial_{\phi} \Big(\nabla_{\theta} \mathcal{L}_{\text{local}}(\theta, \phi, r,t) \Big) \label{eq:update_phi}
-\end{equation}
-The detailed training algorithm with Bezier curve modeling as Algorithm~\ref {alg:training_bezier}
+We then use $n-1$ GP processes to model the interaction among individual processes.
 
-\begin{algorithm}
-\caption{Training Algorithm with Bezier curve modeling}
-\label{alg:training_bezier}
-\begin{algorithmic}[1]
-\STATE \textbf{Input:} Dataset $\mathcal{D}$, number of epochs $n_0$.
-\STATE \textbf{Output:} The flow model weight $\theta$.
-\FOR{$i = 1$ to $n_0$}
-    \STATE  \texttt{t,r = sample\_t\_r()}
-    \STATE Sample $Z(t) = (z^t_1,...,z^t_n)$ using equation Eq.~\ref{eq:bezier_point} 
-    \STATE Compute the local velocity loss $\mathcal{L}_{\text{local}}(\theta, \phi, r, t)$ as Eq.~\ref{eq:local_bezier_loss}
-    \STATE Update flow model loss $\Tilde{\theta}$ with the local loss via Eq.~\ref{eq:update_flow_weight_bezier}
-    \STATE Compute the global velocity loss $\mathcal{L}^{i}_{\text{global}}(\Tilde{\theta})$ as Eq.~\ref{eq:global_bezier_loss}
-    \STATE Update the encoding weight $\Tilde{\phi}$ as Eq.~\ref{eq:update_phi} 
-    \STATE Update flow model weight to minimize $\mathcal{L}^{i}_{\text{global}}(\Tilde{\theta})$
-\ENDFOR
-\STATE \textbf{Return} the flow model weight $\theta$ and encoding weight $\phi$.
-\end{algorithmic}
-\end{algorithm}
 
 \subsection{Training Algorithm with GP modeling}
 In this section, we provide our training algorithm using the flow-based model to solve coupled PDE and multiple PDE with the average velocity derived in Section~\ref{sec:average_velocity_couple} and Section~\ref{sec:avergae_velocity_multiple} and $\mathcal{GP}$ modeling. We first denote $Z(t) = (z^t_1, z^t_2, ..., z^t_n)$ and introduce the global average velocity loss for each process $i$ as 
@@ -332,6 +292,50 @@ The detailed training and sampling algorithm are presented in Alg.~\ref{alg:trai
 \STATE Return $Z(0)$
 \end{algorithmic}
 \end{algorithm}
+
+
+\section{Theoretical Analysis}
+In this section, we present our main theoretical results. We begin with problem settings and the key notation. We then establish a generalization error bound for our method that characterizes how the local loss $\mathcal{L}_{\text{local}}$ and global loss $\mathcal{L}_{\text{global}}$ affect the model's performance. This provides a principled foundation for understanding coupled flow models for solving coupled PDEs.
+\subsection{Problem formulation and notations}
+\label{sec:notation}
+For consistency with the literature, let the source distribution with each process $i \in[1,n]$ be $\pi^{(i)}_{0}$, the joint source distribution among processes be $\pi_{0}$. Denote the target distribution with each process $i$ as $\pi^{(i)}_{\tau}$ and the joint target distribution among processes be $\pi_{\tau}$, the predictive distribution as $\hat{\pi}^{(i)}_{\tau}$ and $\hat{\pi}_{\tau}$, respectively. Let $W_2$ be the Wasserstein-2 distance, we have 
+\begin{equation}
+    \sum_{i=1}^{n}W^2_2(\pi^{(i)}_{\tau}, \hat{\pi}^{(i)}_{\tau}) \leq W^2_2 (\pi_\tau, \hat{\pi}_{\tau})
+\end{equation}
+As discussed in Section~\ref{sec:method}, we have the approximate average velocity field for each process as $u^{\theta}_{i}(Z_t, r, t)$. We define the approximate instant velocity field of each processes $i$ by
+\begin{equation}
+    \mu^{\theta}_{i}(t, Z_t) = \lim_{\Delta t \to 0}  u^{\theta}_{i}(Z_t, t, t+ \Delta t) = u^{\theta}_{i}(Z_t, t,t)
+\end{equation}
+We then define the approximate flow map among processes as $M^{\theta}(t, Z_t) = [\mu^{\theta}_1(t, Z_t), ..., \mu^{\theta}_{n}(t, Z_t)]$. The results of this section will be proved under the following common assumptions~\citep{benton2024error}. 
+
+\begin{assumption}[Existence and uniqueness of smooth flows]
+\label{assum:existence}
+For each $\mathrm{z} \in \mathbb{R}^{n \times d}$ and $s\in [0, \tau]$, there exist unique flows $(Y^{\mathrm{z}}_{s,t})_{t\in [s, \tau]}$ and $(Z^{\mathrm{z}}_{s,t})_{t\in [s, \tau]}$ starting at $\mathrm{z}$ with flow map $M^{\text{tar}}(t, \mathrm{z})$ and $M^{\theta}(t, \mathrm{z})$ respectively and continuously differentiable in the input $\mathrm{z},s,t$. 
+\end{assumption}
+\begin{assumption}[Regularity of approximate flow map]
+\label{assum:lipschitz}
+The approximate flow map $M^{\theta}(t, \mathrm{z})$ is differentiable in both inputs. Also, for each $t \in (0, \tau)$, there is a constant $L_t$ such that $M^{\theta}(t, \mathrm{z})$ is $L_t$-Lipschitz in $\mathrm{z}$
+\end{assumption}
+
+\subsection{Main Result}
+\label{sec:theoretical_results}
+Our first main result is the following, which bounds the error of the flow-matching procedure in the Wasserstein-2 distance in terms of the instantaneous local loss and the Lipschitz constant of the approximate flow map $M^{\theta}(t, \mathrm{z})$.
+
+\begin{theorem}
+\label{thm:main_bound}
+Suppose we have $\pi^{(i)}_{\tau}$ and $\hat{\pi}^{(i)}_{\tau}$ as defined in section~\ref{sec:notation} that $Z$ is the flow starting in $\pi_0$ with flow map $M^{\theta}(t, \mathrm{z})$. Under Assumptions \ref{assum:lipschitz} and \ref{assum:existence}, we have 
+$$ \sum_{i=1}^{n} W_2^2(\pi^{(i)}_{\tau}, \hat{\pi}^{(i)}_{\tau}) \leq \mathcal{L}_{\text{global}}(\theta) \leq K^2_{0,\tau} \mathbb{E}_{t \sim U(0,\tau)}[\mathcal{L}_{\text{local}}(\theta,t,t)]$$ 
+where $K_{0,\tau} = \exp \Big(\int_{0}^{\tau} L_t dt \Big)$ reflect the smoothness of approximate flow map. The detailed proof provided in Appendix~\ref{appendix:Proof_mean_bound}.
+\end{theorem}
+This result reveals how the distributional differences between the ground truths and predictions among individual processes can be upper bounded by the global loss $\mathcal{L}_{\text{global}}$, the local loss $\mathcal{L}_{\text{local}}$ and the smoothness controlling term $K_{0, \tau}$, which is the integral of the Lipschitz constant of the approximate flow map $L_t$. We next, extend the setting to the rollout prediction, where the flow model trained on coupling $(\pi_0, \pi_{\tau})$, when predict on time step $\tau + \Delta \tau$ with $\Delta\tau \geq 0$. Using Theorem~\ref{thm:main_bound}, we have the following result.
+
+\begin{lemma}[Error Bound in Rollout Prediction]
+\label{lem:err_rollot}
+Suppose we have $\pi^{(i)}_{\tau + \Delta \tau}$ and $\hat{\pi}^{(i)}_{\tau+ \Delta \tau}$ as the ground truth and predictive distribution respectively, that $Z$ is the flow starting in $\pi_0$ with flow map $M^{\theta}(t, \mathrm{z})$. Extending Assumptions \ref{assum:lipschitz} and \ref{assum:existence} to time-step $\tau + \Delta \tau$, we have 
+$$ \sum_{i=1}^{n} W_2^2(\pi^{(i)}_{\tau+ \Delta \tau}, \hat{\pi}^{(i)}_{\tau + \Delta \tau}) \ \leq K^2_{0,\tau+ \Delta \tau} \Big(\mathbb{E}_{t \sim U(0,\tau)}[\mathcal{L}_{\text{local}}(\theta,t,t)] +  \mathbb{E}_{t \sim U(\tau,\tau+\Delta \tau)}[\mathcal{L}_{\text{local}}(\theta,t,t)]\Big)$$  
+\end{lemma}
+
+
 \section{Empirical Analysis}
 \subsection{Implementation details}
 \textbf{Benchmarks}:  Following the prior practice \citep{sun2025compolunifiedneuraloperator}, we evaluated our method on predicting coupled multi-physics PDEs systems using five benchmarks: 1-D Lotka-Volterra equations \citep{Murray2002} (2 processes), 1-D Belousov-Zhabotinsky equations \citep{Petrov1993} (3 processes), 2-D Gray-
@@ -341,6 +345,53 @@ conditions remained constant to isolate the effects of varying initial condition
 
 \textbf{Competing baselines}: We evaluated our proposed method again state-of-the-art neural operators baselines: COMPOL \citep{sun2025compolunifiedneuraloperator}, FNO \citep{li2021fourier}, UFNO \citep{wen2022ufnoenhancedfourier}, Transolver \citep{wu2024transolverfasttransformersolver}, DeepOnet \citep{lu2021learning}, and CMWNO \citep{xiao2023coupled}. COMPOL and CMWNO are designed for coupled PDE problems, while other baselines are not inherently designed for multi-physics modeling. Therefore, following the practice~\cite{sun2025compolunifiedneuraloperator}, we adapt them by concatenating process inputs and outputs across their respective channels. We also adapt the prior experiment setting \citep{sun2025compolunifiedneuraloperator}, \cite{xiao2023coupled}, with Adam optimizer (learning rate $=0.001$). Except for CMWNO, which employed a step scheduler (as in its original
 implementation), all models used a cosine annealing schedule. DeepONet is trained with $10000$ epochs, while other baselines trained with $500$ epochs. 
+
+\subsection{Analysis of Predictive Performance}
+
+\begin{table}[!htbp]
+\centering
+\renewcommand{\arraystretch}{1.2}
+\setlength{\tabcolsep}{0.35em}
+\resizebox{\columnwidth}{!}{%
+\begin{tabular}{@{}lc|ccccc@{}}
+\hline
+\textbf{Method} & \textit{Train Samples} & \textit{Lotka-V.} & \textit{Belousov-Z.} & \textit{Grey-Scott} & \textit{Multiphase} & \textit{THM} \\
+\hline
+\multirow{2}{*}{$\text{FNO}_{c}$} & 512 & 12.29 & 0.18 & 0.88 & 2.29 & 0.15 \\
+& 1024 & 9.55 & 0.16 & 0.55 & 7.98 & 0.11 \\
+\hline
+\multirow{2}{*}{CMWNO} & 512 & 27.21 & 0.64 & 0.83 & 9.54 & 3.30 \\
+& 1024 & 16.55 & 0.51 & 0.63 & 6.86 & 2.72 \\
+\hline
+\multirow{2}{*}{$\text{UFNO}_{c}$} & 512 & 11.63 & 0.20 & 0.55 & 4.48 & 0.13 \\
+& 1024 & 8.73 & 0.14 & 0.36 & 7.61 & 0.08 \\
+\hline
+\multirow{2}{*}{$\text{Transolver}_{c}$} & 512 & 18.19 & 5.97 & 0.54 & 1.28 & 0.18 \\
+& 1024 & 17.67 & 1.88 & 0.49 & 0.88 & 0.16 \\
+\hline
+\multirow{2}{*}{$\text{DiffusionPDE}_{c}$} & 512 & 472.41 & 308.81 & 31.67 & 12.84 & 5.62 \\
+& 1024 & 455.28 & 172.74 &  & 14.33 & 5.62 \\
+\hline
+\multirow{2}{*}{$\text{DeepONet}_{c}$} & 512 & 55.46 & 1.11 & 31.30 & 31.20 & 31.36 \\
+& 1024 & 54.83 & 0.99 & 30.99 & 28.19 & 31.50 \\
+\hline
+\multirow{2}{*}{COMPOL-RNN} & 512 & 10.43 & 0.17 & 0.66 & 2.21 & 0.14 \\
+& 1024 & 8.02 & 0.15 & 0.50 & 6.44 & 0.09 \\
+\hline
+\multirow{2}{*}{COMPOL-ATN} & 512 & 11.32 & 0.18 & 0.61 & 2.17 & 0.14 \\
+& 1024 & 8.58 & 0.15 & 0.48 & 6.76 & 0.10 \\
+\hline
+\multirow{2}{*}{Our-GP} & 512 & \textbf{2.16} & \textbf{0.15} & \textbf{0.19} & \textbf{0.52} & \textbf{0.07} \\
+& 1024 & \textbf{2.01} & \textbf{0.09} & \textbf{0.15} & \textbf{0.13} & \textbf{0.06} \\
+\hline
+\end{tabular}}
+\vspace{1em}
+\caption{\small Comparison of relative $L_2$ prediction errors ($\times 10^{-2}$). Bold values indicate the best performance for each case. }
+\label{tab:main_results}
+\end{table}
+
+
+
 \section{Discussion}
 [TODO]
 \section{Conclusion}
@@ -401,8 +452,8 @@ where
 Thus, we have the mean function as $\mathbf{f}_{*}(\mathrm{x}_*)$ as 
 \begin{align}
     \mathbf{f}_{*}(\mathrm{x}_*) &= \mathbf{K}^{T}_{\mathrm{x}_{*}} \big(\mathbf{K}(X,X) )^{-1} \mathbf{y} \\
-    &= \big(\mathbf{k}^{T}_{\mathrm{x}_{*}} \otimes B \big)\big(\mathbf{k}_{\mathrm{x}}(X,X)^{-1}  \otimes  \mathbf{B}^{-1} \big) \mathbf{y} \\
-    &= \Big(\mathbf{k}^{T}_{\mathrm{x}_{*}} \mathbf{k}_{\mathrm{x}}(X,X)^{-1}\Big) \otimes \Big(B  B^{-1}\Big) \mathbf{y} \\
+    &= \big(\mathbf{k}^{T}_{\mathrm{x}_{*}} \otimes \mathbf{B} \big)\big(\mathbf{k}_{\mathrm{x}}(X,X)^{-1}  \otimes  \mathbf{B}^{-1} \big) \mathbf{y} \\
+    &= \Big(\mathbf{k}^{T}_{\mathrm{x}_{*}} \mathbf{k}_{\mathrm{x}}(X,X)^{-1}\Big) \otimes \Big(\mathbf{B}  \mathbf{B}^{-1}\Big) \mathbf{y} \\
     &= \Big( \big(\mathbf{k}^{T}_{\mathrm{x}_{*}} \mathbf{k}_{\mathrm{x}}(X,X)^{-1}\big) \otimes I_{d} \Big)\mathbf{y} \label{eq:mean_function_closed_form}
 \end{align}
 Using Eq.~\ref{eq:mean_function_closed_form}, we have the closed form of the mean function when predicting for the new input $\mathrm{x}_{*}$ without the requirement for the pre-trained matrix $B$. For practical implementation, we define the input covariance function as the squared-exponential covariance function 
@@ -411,7 +462,150 @@ Using Eq.~\ref{eq:mean_function_closed_form}, we have the closed form of the mea
 \end{equation}
 where $\ell$ is the length-scale and $\sigma^2_f$ is the signal variance. 
 
-\section{Bezier Modeling implementation details}
+
+\section{Proof of the Theorem~\ref{thm:main_bound}}
+\label{appendix:Proof_mean_bound}
+In this section, we provide the detailed proof of the theorem~\ref{thm:main_bound}. As discussed in Section~\ref{sec:notation}, for flow gap $M(t, Z_t)$, we get the standard ODE as 
+\begin{equation}
+    M(t, Z ) = \frac{d}{dt}\Big(Z(t) \Big)
+\end{equation}
+As Section~\ref{sec:notation}, we have the ground truth distribution at the solution space be $\pi_\tau$, and the predicted distribution be $\hat{\pi}_\tau$. Then, 
+\begin{equation}
+    \sum_{i=1}^{n} W^2_2(\hat{\pi}^{(i)}_\tau, \pi^{(i)}_\tau) \leq W^2_2(\hat{\pi}_\tau, \pi_\tau)  \leq \mathbb{E} \Big[\| Z_\tau - Y_\tau \|^2_2 \Big] = \mathcal{L}_{\text{global}}(\theta)
+\end{equation}
+where $Y(t)$ is the ground truth flow variable with ground truth velocity field as $\dot{Y}(t)$ and  $Z: \mathbb{R}^{n \times d} \times [0,T]^2 \to \mathbb{R}^{n \times d}$ be a continuous solution of the integral equation 
+\begin{equation}
+    Z^{\mathrm{z}}_{s,t} = \mathrm{z} + \int_{s}^{t} M^{\theta}(r, Z^{\mathrm{z}}_{s,r}) dr \label{eq:define_learned_flow}
+\end{equation}
+Using the Alekseev-Gröbner~\citep{grobner1960lie} formula, we have the following. 
+\begin{equation}
+    Z^{Y_0}_{0,T} - Y_T = \int_{0}^{T} \Big(\nabla_{Y_r} Z^{Y_r}_{r,T}\Big) \Big(M^{\theta}(r,Y_r) - \dot{Y}_r \Big) dr  \label{eq:Alek_Gro_formula}
+\end{equation}
+Using Eq.~\ref{eq:define_learned_flow}, we can write 
+\begin{equation}
+    \nabla_{\mathrm{z}} Z^{\mathrm{z}}_{s,t} = I + \int_{s}^{t} \nabla_{\mathrm{z}} M^{\theta}(r, Z^{\mathrm{z}}_{s,r}) \nabla_{\mathrm{z}} Z^{\mathrm{z}}_{s,r} dr
+\end{equation}
+It shows that 
+\begin{equation}
+    \frac{\partial}{\partial t} \|\nabla_{\mathrm{z}}  Z^{\mathrm{z}}_{s,t}\|_{\text{op}} \leq \| \frac{\partial}{\partial t} \nabla_{\mathrm{z}}  Z^{\mathrm{z}}_{s,t}\|_{\text{op}} = \| \nabla_{\mathrm{z}} M^{\theta}(r, Z^{\mathrm{z}}_{s,t})  \nabla_{\mathrm{z}} Z^{\mathrm{z}}_{s,t}\|_{\text{op}}
+\end{equation}
+where $\|\cdot \|_{\text{op}}$ denotes the operator norm with respect to the $\ell_2$ metric. With the assumption that, $\| \nabla_{\mathrm{z}} M^{\theta}(r, Z^{\mathrm{z}}_{s,t})\| \leq L_t$, we have 
+\begin{equation}
+   \frac{\partial}{\partial t} \|\nabla_{\mathrm{z}}  Z^{\mathrm{z}}_{s,t}\|_{\text{op}} \leq L_t \|\nabla_{\mathrm{z}}  Z^{\mathrm{z}}_{s,t}\|_{\text{op}} \label{eq:norm_leq_Lt}
+\end{equation}
+Using Grönwall’s lemma, we have 
+\begin{equation}
+    \|\nabla_{\mathrm{z}}  Z^{\mathrm{z}}_{s,t}\|_{\text{op}} \leq \exp\Big(\int^t_s L_r dr \Big) \leq \exp\Big(\int^\tau_0 L_r dr \Big)
+\end{equation}
+Denote $K_{0, \tau}:= \exp\Big(\int^\tau_0 L_r dr \Big)$ then plug into Eq.~\ref{eq:Alek_Gro_formula} at $T=\tau$, we get
+\begin{equation}
+    \|Z^{\mathrm{z}}_{0,\tau}  - Y^{\mathrm{z}}_{0,\tau}\|_2 \leq K_{0, \tau} \int_{0}^{\tau} \|M^{\theta}(r, Y_r) - \dot{Y}_{r} \|_2 dr
+\end{equation}
+Taking expectation over $\mathrm{z} \sim \pi_0$, we have 
+\begin{align}
+    \mathbb{E}\big[ \| Z^{\mathrm{z}}_{0, \tau}  - Y^{\mathrm{z}}_{0, \tau}\|_2^2\big] &\leq K^2_{0, \tau} \cdot\mathbb{E} \Big[\Big( \int_{0}^{\tau} \|M^{\theta}(r, Y_r) - \dot{Y}_{r} \|_2 dr\Big)^2 \Big]  \\
+    &\leq K_{0, \tau}^2 \int_{0}^\tau \mathbb{E} \Big[\|M^{\theta}(r, Y_r) - \dot{Y}_{r} \|^2_2 \Big] dr \label{eq:error_bound_raw}
+\end{align}
+As discussed in Section~\ref{sec:notation}, we note that the instantaneous velocity field, $\mu^{\theta}_i(r, Y_r)$, represents the limiting value of the time-averaged velocity field as the duration of the observation interval, $\Delta t$, vanishes, such that 
+\begin{equation}
+    \mu^{\theta}_i(r, Y_r) =\lim_{\Delta t \to 0} u^{\theta}_i (Y_r, r, r + \Delta t) = u^{\theta}_i(Y_r, r, r )  
+\end{equation}
+Thus, we can write 
+\begin{align}
+    \mathbb{E} \Big[\|M^{\theta}(r, Y_r) - \dot{Y}_{r} \|^2_2 \Big] &= \sum_{i=1}^{n} \mathbb{E} \Big[\|\mu_i^{\theta}(r, Y_r) -  \mu_i^{\text{tar}}(r, Y_r)\|^2_2 \Big] \\
+    &= \mathcal{L}_{\text{local}}(\theta, r, r) \label{eq:relate_to_local_loss}
+\end{align}
+
+Finally, using Eq.~\ref{eq:relate_to_local_loss} and  Eq.~\ref{eq:error_bound_raw}, we have the theorem as
+\begin{equation}
+    \sum_{i=1}^{n} W_2^2(\pi^{(i)}_{\tau}, \hat{\pi}^{(i)}_{\tau}) \leq \mathcal{L}_{\text{global}}(\theta) \leq K^2_{0,\tau} \mathbb{E}_{t \sim U(0,\tau)}[\mathcal{L}_{\text{local}}(\theta,t,t)]
+\end{equation}
+
+\section{Smoothness of velocity fields across design choices}
+\label{appedix:Smoothness_design_choices}
+As discussed in Section~\ref{sec:theoretical_results}, the bound in the Theorem is exponentially dependent on the Lipchitz constant of the learned $M^{\theta}(t, Z)$. In this section, we control the corresponding Lipschitz constant of the chosen target velocity field $\dot{Z}_t$ across different choices of modeling. Follow practice~\citep{benton2024error}, we refer this to controlling the Lipschitz constant of $M^{\theta}(t, Z)$ directly since this is determined by our choice of $\mathcal{M}$.
+\subsection{Smoothness of velocity fields with linear interpolant of time}
+\label{appendix:smoothness_linear}
+We first provide the analysis for the naive setting, where the intermediate latent feature samples form the linear interpolant of time. We have 
+\begin{align}
+    Z_t&= (1-t) Z_0 + t Z_1 \\
+    \dot{Z}_t &= Z_1- Z_0 
+\end{align}
+Thus, we have the target flow map as 
+\begin{align}
+    M^{\text{tar}}(t, \mathrm{z}) &= \mathbb{E}[\dot{Z}_t \mid Z_t = \mathrm{z}] = \frac{1}{t} \Big(\mathrm{z} - \mathbb{E}[Z_0 \mid Z_t = \mathrm{z}] \Big)  \\
+     \nabla_{\mathrm{z}}M^{\text{tar}}(t, \mathrm{z}) &= \frac{1}{t} \Big(I - \nabla_{\mathrm{z}} \mathbb{E}[Z_0 \mid Z_t = \mathrm{z}] \Big)
+\end{align}
+We can then compute $K^{\text{linear}}$ as 
+\begin{equation}
+    K^{\text{linear}} = \exp \Big(\int_{0}^{1} L^*_t dt \Big) =  \exp \Big(\int_{0}^{1}  \sup_{\mathrm{z}} \Big\|\frac{1}{t}\Big(I - \nabla_{\mathrm{z}} \mathbb{E}[Z_0 \mid Z_t = \mathrm{z}] \Big)  \Big\| dt \Big)
+\end{equation}
+
+\subsection{Smoothness of velocity fields with GP modeling}
+\label{appendix:smoothness_gp}
+In this section, we provide the GP modeling, where interaction information among processes is encoded via Gaussian processes and the Dice Strategy~\cite{xiao2023coupled}. We can write the intermediate latent feature at time-step $t$ as 
+\begin{align}
+    Z_t &= \omega_{1}(t, Z_0, Z_1) Z_0 + \omega_2(t, Z_0, Z_1) Z_1 \\
+    \dot{Z}_{t} &=  \dot{\omega}_{1}(t, Z_0, Z_1) Z_0 + \dot{\omega}_2(t, Z_0, Z_1) Z_1
+\end{align}
+Thus, we have the target flow map as 
+\begin{align}
+    M^{\text{tar}}(t, \mathrm{z}) &= \mathbb{E}[\dot{Z}_t \mid Z_t = \mathrm{z}] \\
+    \nabla_{\mathrm{z}}M^{\text{tar}}(t, \mathrm{z}) &= \nabla_{\mathrm{z}} \mathbb{E}[\dot{Z}_t \mid Z_t = \mathrm{z}] = \mathbb{E}[\nabla_{\mathrm{z}}  \dot{Z}_t \mid Z_t = \mathrm{z}]
+\end{align}
+We have 
+\begin{equation}
+    L^*_t = \sup_{\mathrm{z}} \|\mathbb{E}[\nabla_{\mathrm{z}}  \dot{Z}_t \mid Z_t = \mathrm{z}] \|
+\end{equation}
+We then can compute $K^{\text{gp}}$ as 
+\begin{equation}
+    K^{\text{gp}} = \exp \Big(\int_{0}^{1} L^*_t dt \Big) = \exp \Big(\int_{0}^{1}  \sup_{\mathrm{z}} \|\mathbb{E}[\nabla_{\mathrm{z}}  \dot{Z}_t \mid Z_t = \mathrm{z}] \| dt \Big)
+\end{equation}
+\section{Additional Experiment Results and Ablation Studies}
+\label{appendix:Experiment_detailed_results}
+In this section, we provide the detailed and additional experiment results and ablation studies. 
+
+
+
+\begin{table}[!htbp]
+\centering
+\renewcommand{\arraystretch}{1.2}
+\setlength{\tabcolsep}{0.35em}
+\resizebox{\columnwidth}{!}{%
+\begin{tabular}{@{}lcccccc@{}}
+\hline
+\textbf{Method} & \textit{Train Samples} & \textit{Lotka-V.} & \textit{Belousov-Z.} & \textit{Grey-Scott} & \textit{Multiphase} & \textit{THM} \\
+\hline
+\multirow{2}{*}{FNO} & 512 & 0.1229 $\pm$4e-5 & 0.0018 $\pm$3e-5 & 0.0088 $\pm$4e-5 & 0.0229 $\pm$2e-4 & 0.0015 $\pm$2e-5 \\
+& 1024 & 0.0955 $\pm$6e-5 & 0.0016 $\pm$3e-5 & 0.0055 $\pm$3e-6 & 0.0798 $\pm$1e-5 & 0.0011 $\pm$1e-6 \\
+\hline
+\multirow{2}{*}{CMWNO} & 512 & 0.2721 $\pm$3e-5 & 0.0064 $\pm$2e-5 & 0.0083 $\pm$5e-4 & 0.0954 $\pm$2e-5 & 0.0330 $\pm$4e-5 \\
+& 1024 & 0.1655 $\pm$1e-5 & 0.0051 $\pm$5e-5 & 0.0063 $\pm$3e-5 & 0.0686 $\pm$7e-4 & 0.0272 $\pm$5e-5 \\
+\hline
+\multirow{2}{*}{UFNO} & 512 & 0.1163 $\pm$1e-4 & 0.0020 $\pm$6e-6 & 0.0055 $\pm$5e-5 & 0.0448 $\pm$1e-5 & 0.0013 $\pm$3e-5 \\
+& 1024 & 0.0873 $\pm$8e-5 & 0.0014 $\pm$2e-5 & 0.0036 $\pm$6e-6 & 0.0761 $\pm$1e-5 & 0.0008 $\pm$4e-5 \\
+\hline
+\multirow{2}{*}{Transolver} & 512 & 0.1819 $\pm$1e-5 & 0.0597 $\pm$7e-6 & 0.0054 $\pm$9e-6 & 0.0128 $\pm$4e-5 & 0.0018 $\pm$1e-5 \\
+& 1024 & 0.1767 $\pm$1e-5 & 0.0188 $\pm$2e-5 & 0.0049 $\pm$2e-5 & 0.0088 $\pm$3e-5 & 0.0016 $\pm$5e-5 \\
+\hline
+\multirow{2}{*}{DeepONet} & 512 & 0.5546 $\pm$7e-5 & 0.0111 $\pm$1e-5 & 0.3130 $\pm$1e-5 & 0.3120 $\pm$1e-5 & 0.3136 $\pm$1e-5 \\
+& 1024 & 0.5483 $\pm$6e-5 & 0.0099 $\pm$1e-5 & 0.3099 $\pm$1e-5 & 0.2819 $\pm$7e-5 & 0.3150 $\pm$1e-5 \\
+\hline
+\multirow{2}{*}{COMPOL-RNN} & 512 & 0.1043 $\pm$2e-5 & 0.0017 $\pm$2e-5 & 0.0066 $\pm$1e-4 & 0.0221 $\pm$1e-5 & 0.0014 $\pm$3e-5 \\
+& 1024 & 0.0802 $\pm$4e-5 & 0.0015 $\pm$8e-6 & 0.0050 $\pm$4e-5 & 0.0644 $\pm$3e-5 & 0.0009 $\pm$4e-5 \\
+\hline
+\multirow{2}{*}{COMPOL-ATN} & 512 & 0.1132 $\pm$1e-4 & 0.0018 $\pm$4e-5 & 0.0061 $\pm$3e-5 & 0.0217 $\pm$3e-5 & 0.0014 $\pm$3e-5 \\
+& 1024 & 0.0858 $\pm$5e-5 & 0.0015 $\pm$3e-5 & 0.0048 $\pm$2e-5 & 0.0676 $\pm$3e-5 & 0.0010 $\pm$2e-5 \\
+\hline
+\multirow{2}{*}{Our-GP} & 512 & \textbf{0.0216 $\pm$2e-5} & \textbf{0.0015 $\pm$4e-5} & \textbf{0.0019 $\pm$3e-5} & \textbf{0.0052 $\pm$3e-5} & \textbf{0.0007 $\pm$2e-5} \\
+& 1024 & \textbf{0.0201 $\pm$3e-5} & \textbf{0.0009 $\pm$3e-5} & \textbf{0.0015 $\pm$5e-5} & \textbf{0.0013 $\pm$1e-5} & \textbf{0.0006 $\pm$2e-5} \\
+\hline
+\end{tabular}}
+\vspace{1em}
+\caption{\small Comparison of relative $L_2$ prediction errors (mean $\pm$ std where std is rounding leftover, or $1\times10^{-5}$ when exact zero). Bold values indicate the best performance for each case.}
+\label{tab:nrmse}
+\end{table}
+
 
 \newpage
 \input{checklist.tex}
