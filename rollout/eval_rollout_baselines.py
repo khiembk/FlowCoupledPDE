@@ -70,7 +70,7 @@ def _gs512_registry():
 
     def compol_atn():
         return COMPOL2d(in_channels=1, out_channels=1, n_proc=n,
-                        modes1=16, modes2=16, width=64, n_layers=4,
+                        modes1=12, modes2=12, width=32, n_layers=4,
                         n_heads=4, padding=9, aggr_type="atn")
 
     return [
@@ -104,6 +104,24 @@ def _rollout(model: nn.Module, z0: torch.Tensor, n_steps: int):
         preds.append(pred)
         src = pred
     return preds
+
+
+# ── key remapping for checkpoints saved with old naming conventions ───────────
+
+def _remap_state_dict(name, state_dict):
+    """Fix CMWNO2d checkpoints: net{1,2}_{row,col} → nets_{row,col}.{0,1}"""
+    if "cmwno" not in name:
+        return state_dict
+    mapping = {"net1_row.": "nets_row.0.", "net2_row.": "nets_row.1.",
+               "net1_col.": "nets_col.0.", "net2_col.": "nets_col.1."}
+    new = {}
+    for k, v in state_dict.items():
+        for old_prefix, new_prefix in mapping.items():
+            if k.startswith(old_prefix):
+                k = new_prefix + k[len(old_prefix):]
+                break
+        new[k] = v
+    return new
 
 
 # ── main ─────────────────────────────────────────────────────────────────────
@@ -147,7 +165,8 @@ def main():
 
         model = factory().to(device)
         ckpt  = torch.load(ckpt_path, map_location="cpu", weights_only=False)
-        model.load_state_dict(ckpt["model"], strict=True)
+        state = _remap_state_dict(name, ckpt["model"])
+        model.load_state_dict(state, strict=True)
         model.eval()
 
         nums = [0.0] * args.max_steps
