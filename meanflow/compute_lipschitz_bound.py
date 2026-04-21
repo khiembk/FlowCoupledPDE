@@ -532,31 +532,37 @@ if __name__ == "__main__":
         # Save figure
         os.makedirs(out_dir, exist_ok=True)
         out_png = os.path.join(out_dir, f"L_curve_{name}.png")
-        fig, axes = plt.subplots(1, 2, figsize=(12, 4))
+        fig, axes = plt.subplots(1, 2, figsize=(14, 5))
         fig.suptitle(
-            f"{name.upper()} — N={z0_all.shape[0]}, n={z0_all.shape[1]}, d={d}",
-            fontsize=13,
+            f"$L^*_t$ curve — {name.upper()}   "
+            f"(N={z0_all.shape[0]}, n={z0_all.shape[1]}, d={d})",
+            fontsize=15, fontweight="bold", y=1.01,
         )
+        y_max = max(float(L_lin.max()), float(L_gp_c.max())) * 1.15
         for ax, L_c, integ, K, label, color in zip(
             axes,
             [L_lin, L_gp_c],
             [integ_lin, integ_gp],
             [K_lin, K_gp],
             ["Linear interpolant (App. C.1)",
-             f"GP interpolant (App. C.2,  l={l_gp:.2f})"],
+             f"GP interpolant (App. C.2,  $\\ell$={l_gp:.2f})"],
             ["steelblue", "darkorange"],
         ):
-            ax.plot(t_grid.numpy(), L_c.numpy(), color=color, linewidth=2)
-            ax.fill_between(t_grid.numpy(), 0, L_c.numpy(), alpha=0.15, color=color)
-            ax.set_xlabel("Flow time  t", fontsize=12)
-            ax.set_ylabel("L*_t", fontsize=11)
-            ax.set_title(label, fontsize=12)
-            ax.text(0.05, 0.92,
-                    f"∫L*_t dt = {float(integ):.4f}\nK_{{0,τ}} = {float(K):.4f}",
-                    transform=ax.transAxes, fontsize=10, verticalalignment="top",
-                    bbox=dict(boxstyle="round", facecolor="wheat", alpha=0.5))
-            ax.grid(True, linestyle="--", alpha=0.5)
-        plt.tight_layout()
+            ax.plot(t_grid.numpy(), L_c.numpy(), color=color, linewidth=2.5)
+            ax.fill_between(t_grid.numpy(), 0, L_c.numpy(), alpha=0.18, color=color)
+            ax.set_xlabel("Flow time  $t$", fontsize=13)
+            ax.set_ylabel("$L^*_t$  (spectral norm of Jacobian)", fontsize=12)
+            ax.set_title(label, fontsize=13, pad=8)
+            ax.set_ylim(0, y_max)
+            ax.text(0.04, 0.96,
+                    f"$\\int_0^1 L^*_t\\,dt$ = {float(integ):.4f}\n"
+                    f"$K_{{0,\\tau}}$ = {float(K):.4f}",
+                    transform=ax.transAxes, fontsize=11, verticalalignment="top",
+                    bbox=dict(boxstyle="round,pad=0.4", facecolor="wheat",
+                              edgecolor="gray", alpha=0.7))
+            ax.grid(True, linestyle="--", alpha=0.4)
+            ax.spines[["top", "right"]].set_visible(False)
+        plt.tight_layout(pad=1.5)
         plt.savefig(out_png, dpi=150, bbox_inches="tight")
         plt.close(fig)
         print(f"  Figure saved: {out_png}")
