@@ -437,6 +437,8 @@ if __name__ == "__main__":
     parser.add_argument("--T_quad", type=int, default=20,
                         help="Number of quadrature time points (t-grid size).")
     parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument("--l_gp", type=float, default=0.0,
+                        help="GP length scale.  0.0 (default) = auto: sqrt(d+1).")
     parser.add_argument("--out_dir", default=".",
                         help="Directory to save output plots.")
     cli = parser.parse_args()
@@ -590,11 +592,9 @@ if __name__ == "__main__":
                 fpath, _TYPE[dset], cli.N_samples, cli.n_spatial, cli.seed,
             )
             d = z0_all.shape[2]
-            # GP length scale: normalized so that typical ||x_i - x_j|| ~ l
-            # With d-dimensional z-scored vectors, ||z0-z1||^2 ~ d, plus time dim → d+1
-            l_gp = float(np.sqrt(d + 1))
+            l_gp = cli.l_gp if cli.l_gp > 0.0 else float(np.sqrt(d + 1))
             print(f"  Loaded in {_time.time()-t0:.1f}s  |  "
-                  f"shape: {tuple(z0_all.shape)}  |  auto l_gp = {l_gp:.3f}")
+                  f"shape: {tuple(z0_all.shape)}  |  l_gp = {l_gp:.3f}")
 
         res = run_and_plot(dset, z0_all, z1_all, cli.T_quad, l_gp, cli.out_dir)
         all_results[dset] = res

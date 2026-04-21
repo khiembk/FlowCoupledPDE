@@ -22,8 +22,9 @@ mkdir -p $OUT
 python compute_lipschitz_bound.py \
     --data_dir $DATA \
     --datasets gs mpf lv \
-    --N_samples 50 \
+    --N_samples 150 \
     --n_spatial 8 \
     --T_quad 20 \
+    --l_gp 1.0 \
     --seed 42 \
     --out_dir $OUT
