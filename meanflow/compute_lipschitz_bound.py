@@ -404,59 +404,208 @@ def plot_L_curve(t_grid, L_curve_linear, L_curve_gp,
 
 
 # ═══════════════════════════════════════════════════════════════
-# 8.  Quick demo  (replace with your actual dataset)
+# 8.  Driver: real PDE datasets (GS, MPF, LV) + optional toy demo
+#
+#   Usage:
+#     python compute_lipschitz_bound.py                         # GS+MPF+LV
+#     python compute_lipschitz_bound.py --datasets toy          # synthetic
+#     python compute_lipschitz_bound.py --datasets gs lv        # subset
+#     python compute_lipschitz_bound.py --N_samples 30 --T_quad 10  # fast
 # ═══════════════════════════════════════════════════════════════
 
 if __name__ == "__main__":
-    torch.manual_seed(42)
+    import argparse
+    import os
+    import time as _time
 
-    # ── Synthetic toy dataset mimicking a 2-process, 4-point mesh ──
-    N   = 20     # training samples
-    n   = 2      # number of coupled processes
-    d   = 4      # spatial dimension (flattened mesh size)
-    T   = 100    # quadrature grid size
-
-    z0_all = torch.randn(N, n, d)
-    z1_all = z0_all + 0.3 * torch.randn(N, n, d)   # small perturbation
-
-    print("=" * 60)
-    print("Computing L*_t curve — LINEAR interpolant")
-    print("=" * 60)
-    t_grid, L_linear, integ_linear, K_linear = compute_K_and_L_curve(
-        z0_all, z1_all,
-        mode    = "linear",
-        T       = T,
-        bw      = 0.0,   # auto bandwidth
-        verbose = True,
+    parser = argparse.ArgumentParser(
+        description="Compute K_{0,τ} for real PDE datasets (GS, MPF, LV) "
+                    "or a synthetic toy example."
     )
-    print(f"\n  ∫₀¹ L*_t dt  (linear) = {integ_linear:.6f}")
-    print(f"  K_{{0,τ}}     (linear) = {K_linear:.6f}")
+    parser.add_argument("--data_dir", default="/scratch/user/u.kt348068/PDE_data",
+                        help="Directory containing the .pt dataset files.")
+    parser.add_argument("--datasets", nargs="+", default=["gs", "mpf", "lv"],
+                        choices=["gs", "mpf", "lv", "toy"],
+                        help="Datasets to evaluate.  'toy' runs the synthetic example.")
+    parser.add_argument("--N_samples", type=int, default=50,
+                        help="Number of training pairs to subsample.")
+    parser.add_argument("--n_spatial", type=int, default=64,
+                        help="Target spatial points per process after subsampling. "
+                             "For 2D data the actual count is (H//stride)^2 where "
+                             "stride = H // ceil(sqrt(n_spatial)).")
+    parser.add_argument("--T_quad", type=int, default=20,
+                        help="Number of quadrature time points (t-grid size).")
+    parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument("--out_dir", default=".",
+                        help="Directory to save output plots.")
+    cli = parser.parse_args()
 
-    print("\n" + "=" * 60)
-    print("Computing L*_t curve — GP modeling")
-    print("=" * 60)
-    t_grid, L_gp, integ_gp, K_gp = compute_K_and_L_curve(
-        z0_all, z1_all,
-        mode    = "gp",
-        T       = T,
-        sigma_f = 1.0,
-        l       = 1.0,
-        bw      = 0.0,   # auto bandwidth
-        verbose = True,
-    )
-    print(f"\n  ∫₀¹ L*_t dt  (GP)     = {integ_gp:.6f}")
-    print(f"  K_{{0,τ}}     (GP)     = {K_gp:.6f}")
+    _TRAIN_RATIO = 0.6305
+    _FILE = {"gs": "gs_512.pt", "mpf": "mpf_512.pt", "lv": "lv_512.pt"}
+    _TYPE = {"gs": "2d",        "mpf": "2d",          "lv": "1d"}
 
-    print("\n" + "=" * 60)
-    print("Summary")
-    print("=" * 60)
-    print(f"  K_{{0,τ}} linear  = {K_linear:.4f}  "
-          f"(bound multiplier in Theorem 1: {K_linear**2:.4f})")
-    print(f"  K_{{0,τ}} GP      = {K_gp:.4f}  "
-          f"(bound multiplier in Theorem 1: {K_gp**2:.4f})")
-    print(f"\n  GP modeling {'reduces' if K_gp < K_linear else 'increases'} K by "
-          f"{abs(K_gp - K_linear) / K_linear * 100:.1f}% vs linear")
+    # ── Real-data loader ──────────────────────────────────────────
+    def load_real_dataset(data_path, data_type, N_samples, n_spatial, seed):
+        """
+        Extract source/target pairs from a .pt dataset file.
 
-    plot_L_curve(t_grid, L_linear, L_gp,
-                 integ_linear, integ_gp,
-                 K_linear, K_gp)
+        Returns z0_all [N, n_proc, d], z1_all [N, n_proc, d] (z-scored per process).
+        The GP length scale l should be set to sqrt(d+1) for the returned data.
+        """
+        torch.manual_seed(seed)
+        data = torch.load(data_path, map_location="cpu").float()
+
+        if data_type == "2d":
+            # [N_traj, N_env, n_proc, T, H, W]
+            N_traj, N_env, n_proc, T, H, W = data.shape
+            n_train = int(N_traj * _TRAIN_RATIO)
+            data_tr = data[:n_train]
+
+            # All horizon-1 consecutive pairs → [n_train*N_env*(T-1), n_proc, H, W]
+            src = data_tr[:, :, :, :-1, :, :]
+            tgt = data_tr[:, :, :, 1:,  :, :]
+            src = src.permute(0, 1, 3, 2, 4, 5).reshape(-1, n_proc, H, W)
+            tgt = tgt.permute(0, 1, 3, 2, 4, 5).reshape(-1, n_proc, H, W)
+
+            # Spatial subsampling → [N', n_proc, d]
+            side   = max(1, int(np.ceil(np.sqrt(n_spatial))))
+            stride = max(1, H // side)
+            src = src[:, :, ::stride, ::stride].reshape(src.shape[0], n_proc, -1)
+            tgt = tgt[:, :, ::stride, ::stride].reshape(tgt.shape[0], n_proc, -1)
+
+        else:  # "1d"
+            # [N_traj, N_env, n_proc, T, L]
+            N_traj, N_env, n_proc, T, L = data.shape
+            n_train = int(N_traj * _TRAIN_RATIO)
+            data_tr = data[:n_train]
+
+            src = data_tr[:, :, :, :-1, :]
+            tgt = data_tr[:, :, :, 1:,  :]
+            src = src.permute(0, 1, 3, 2, 4).reshape(-1, n_proc, L)
+            tgt = tgt.permute(0, 1, 3, 2, 4).reshape(-1, n_proc, L)
+
+            stride = max(1, L // n_spatial)
+            src = src[:, :, ::stride]
+            tgt = tgt[:, :, ::stride]
+
+        # Random subsample
+        idx = torch.randperm(src.shape[0])[:N_samples]
+        src = src[idx].float()
+        tgt = tgt[idx].float()
+
+        # Z-score per process so that each component is O(1) with std~1
+        for p in range(src.shape[1]):
+            m = src[:, p].mean()
+            s = src[:, p].std().clamp_min(1e-6)
+            src[:, p] = (src[:, p] - m) / s
+            tgt[:, p] = (tgt[:, p] - m) / s
+
+        return src, tgt   # z0_all, z1_all: [N, n_proc, d]
+
+    # ── Per-dataset compute + plot ────────────────────────────────
+    def run_and_plot(name, z0_all, z1_all, T_quad, l_gp, out_dir):
+        d = z0_all.shape[2]
+
+        print(f"\n  -- LINEAR interpolant --")
+        t0 = _time.time()
+        t_grid, L_lin, integ_lin, K_lin = compute_K_and_L_curve(
+            z0_all, z1_all, mode="linear", T=T_quad, bw=0.0, verbose=True,
+        )
+        print(f"  Elapsed: {_time.time()-t0:.1f}s  |  "
+              f"∫L*_t dt = {float(integ_lin):.4f}  |  K = {float(K_lin):.4f}")
+
+        print(f"\n  -- GP interpolant (l={l_gp:.3f}) --")
+        t0 = _time.time()
+        t_grid, L_gp_c, integ_gp, K_gp = compute_K_and_L_curve(
+            z0_all, z1_all, mode="gp", T=T_quad, bw=0.0, l=l_gp, verbose=True,
+        )
+        print(f"  Elapsed: {_time.time()-t0:.1f}s  |  "
+              f"∫L*_t dt = {float(integ_gp):.4f}  |  K = {float(K_gp):.4f}")
+
+        # Save figure
+        os.makedirs(out_dir, exist_ok=True)
+        out_png = os.path.join(out_dir, f"L_curve_{name}.png")
+        fig, axes = plt.subplots(1, 2, figsize=(12, 4))
+        fig.suptitle(
+            f"{name.upper()} — N={z0_all.shape[0]}, n={z0_all.shape[1]}, d={d}",
+            fontsize=13,
+        )
+        for ax, L_c, integ, K, label, color in zip(
+            axes,
+            [L_lin, L_gp_c],
+            [integ_lin, integ_gp],
+            [K_lin, K_gp],
+            ["Linear interpolant (App. C.1)",
+             f"GP interpolant (App. C.2,  l={l_gp:.2f})"],
+            ["steelblue", "darkorange"],
+        ):
+            ax.plot(t_grid.numpy(), L_c.numpy(), color=color, linewidth=2)
+            ax.fill_between(t_grid.numpy(), 0, L_c.numpy(), alpha=0.15, color=color)
+            ax.set_xlabel("Flow time  t", fontsize=12)
+            ax.set_ylabel("L*_t", fontsize=11)
+            ax.set_title(label, fontsize=12)
+            ax.text(0.05, 0.92,
+                    f"∫L*_t dt = {float(integ):.4f}\nK_{{0,τ}} = {float(K):.4f}",
+                    transform=ax.transAxes, fontsize=10, verticalalignment="top",
+                    bbox=dict(boxstyle="round", facecolor="wheat", alpha=0.5))
+            ax.grid(True, linestyle="--", alpha=0.5)
+        plt.tight_layout()
+        plt.savefig(out_png, dpi=150, bbox_inches="tight")
+        plt.close(fig)
+        print(f"  Figure saved: {out_png}")
+
+        return {
+            "K_linear": float(K_lin), "integ_linear": float(integ_lin),
+            "K_gp":     float(K_gp),  "integ_gp":     float(integ_gp),
+        }
+
+    # ── Main loop ─────────────────────────────────────────────────
+    torch.manual_seed(cli.seed)
+    all_results = {}
+
+    for dset in cli.datasets:
+        print("\n" + "=" * 70)
+        print(f"  Dataset: {dset.upper()}")
+        print("=" * 70)
+
+        if dset == "toy":
+            N, n, d = 20, 2, 4
+            z0_all = torch.randn(N, n, d)
+            z1_all = z0_all + 0.3 * torch.randn(N, n, d)
+            l_gp = 1.0
+            print(f"  Synthetic toy: N={N}, n={n}, d={d},  l_gp={l_gp}")
+        else:
+            fpath = os.path.join(cli.data_dir, _FILE[dset])
+            if not os.path.exists(fpath):
+                print(f"  [SKIP] File not found: {fpath}")
+                continue
+            print(f"  Loading {fpath} …")
+            t0 = _time.time()
+            z0_all, z1_all = load_real_dataset(
+                fpath, _TYPE[dset], cli.N_samples, cli.n_spatial, cli.seed,
+            )
+            d = z0_all.shape[2]
+            # GP length scale: normalized so that typical ||x_i - x_j|| ~ l
+            # With d-dimensional z-scored vectors, ||z0-z1||^2 ~ d, plus time dim → d+1
+            l_gp = float(np.sqrt(d + 1))
+            print(f"  Loaded in {_time.time()-t0:.1f}s  |  "
+                  f"shape: {tuple(z0_all.shape)}  |  auto l_gp = {l_gp:.3f}")
+
+        res = run_and_plot(dset, z0_all, z1_all, cli.T_quad, l_gp, cli.out_dir)
+        all_results[dset] = res
+
+    # ── Summary table ─────────────────────────────────────────────
+    if all_results:
+        print("\n" + "=" * 70)
+        print("  SUMMARY  —  K_{0,τ} = exp( ∫₀¹ L*_t dt )")
+        print("=" * 70)
+        print(f"  {'Dataset':<8}  {'K_linear':>10}  {'K_gp':>10}  "
+              f"{'K_lin/K_gp':>12}  {'GP reduction'}")
+        print("  " + "-" * 58)
+        for name, res in all_results.items():
+            kl, kg = res["K_linear"], res["K_gp"]
+            ratio  = kl / kg if kg > 0 else float("inf")
+            pct    = (kl - kg) / kl * 100 if kl > 0 else 0.0
+            print(f"  {name.upper():<8}  {kl:>10.4f}  {kg:>10.4f}  "
+                  f"{ratio:>12.3f}  {pct:+.1f}%")
+        print()
