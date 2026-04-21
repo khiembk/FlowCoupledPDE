@@ -25,6 +25,6 @@ python compute_lipschitz_bound.py \
     --N_samples 150 \
     --n_spatial 4 \
     --T_quad 20 \
-    --l_gp 8.0 \
+    --l_gp_sweep 1.5 2.0 2.5 3.0 4.0 5.0 6.0 8.0 10.0 15.0 20.0 \
     --seed 42 \
     --out_dir $OUT

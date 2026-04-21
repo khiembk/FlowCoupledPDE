@@ -438,7 +438,11 @@ if __name__ == "__main__":
                         help="Number of quadrature time points (t-grid size).")
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--l_gp", type=float, default=0.0,
-                        help="GP length scale.  0.0 (default) = auto: sqrt(d+1).")
+                        help="GP length scale.  0.0 = auto: sqrt(d+1).  "
+                             "Ignored when --l_gp_sweep is used.")
+    parser.add_argument("--l_gp_sweep", nargs="+", type=float, default=[],
+                        help="Sweep GP over these length scales per dataset and pick "
+                             "the one that minimises K_gp.  E.g. --l_gp_sweep 2 4 6 8 10")
     parser.add_argument("--out_dir", default=".",
                         help="Directory to save output plots.")
     cli = parser.parse_args()
@@ -585,8 +589,7 @@ if __name__ == "__main__":
             N, n, d = 20, 2, 4
             z0_all = torch.randn(N, n, d)
             z1_all = z0_all + 0.3 * torch.randn(N, n, d)
-            l_gp = 1.0
-            print(f"  Synthetic toy: N={N}, n={n}, d={d},  l_gp={l_gp}")
+            l_gp_default = 1.0
         else:
             fpath = os.path.join(cli.data_dir, _FILE[dset])
             if not os.path.exists(fpath):
@@ -598,25 +601,103 @@ if __name__ == "__main__":
                 fpath, _TYPE[dset], cli.N_samples, cli.n_spatial, cli.seed,
             )
             d = z0_all.shape[2]
-            l_gp = cli.l_gp if cli.l_gp > 0.0 else float(np.sqrt(d + 1))
+            l_gp_default = cli.l_gp if cli.l_gp > 0.0 else float(np.sqrt(d + 1))
             print(f"  Loaded in {_time.time()-t0:.1f}s  |  "
-                  f"shape: {tuple(z0_all.shape)}  |  l_gp = {l_gp:.3f}")
+                  f"shape: {tuple(z0_all.shape)}")
 
-        res = run_and_plot(dset, z0_all, z1_all, cli.T_quad, l_gp, cli.out_dir)
-        all_results[dset] = res
+        # ── LINEAR (computed once) ────────────────────────────────
+        print(f"\n  -- LINEAR interpolant --")
+        t0 = _time.time()
+        t_grid, L_lin, integ_lin, K_lin = compute_K_and_L_curve(
+            z0_all, z1_all, mode="linear", T=cli.T_quad, bw=0.0, verbose=True,
+        )
+        print(f"  Elapsed: {_time.time()-t0:.1f}s  |  "
+              f"∫L*_t dt = {float(integ_lin):.4f}  |  K = {float(K_lin):.4f}")
+
+        # ── GP sweep or single run ────────────────────────────────
+        l_candidates = cli.l_gp_sweep if cli.l_gp_sweep else [l_gp_default]
+        best_l, best_K_gp = None, float("inf")
+        sweep_rows = []
+
+        print(f"\n  -- GP sweep over l = {l_candidates} --")
+        for l_val in l_candidates:
+            t0 = _time.time()
+            _, L_gp_c, integ_gp, K_gp = compute_K_and_L_curve(
+                z0_all, z1_all, mode="gp", T=cli.T_quad, bw=0.0,
+                l=l_val, verbose=False,
+            )
+            elapsed = _time.time() - t0
+            pct = (float(K_lin) - float(K_gp)) / float(K_lin) * 100
+            marker = " ← best" if float(K_gp) < best_K_gp else ""
+            print(f"    l={l_val:<6.2f}  K_gp={float(K_gp):.4f}  "
+                  f"({pct:+.2f}%)  [{elapsed:.1f}s]{marker}")
+            sweep_rows.append((l_val, L_gp_c, float(integ_gp), float(K_gp)))
+            if float(K_gp) < best_K_gp:
+                best_K_gp  = float(K_gp)
+                best_l     = l_val
+                best_L_gp  = L_gp_c
+                best_integ_gp = float(integ_gp)
+
+        # ── Plot with best l ──────────────────────────────────────
+        print(f"\n  Best l for {dset.upper()}: {best_l}  "
+              f"(K_gp={best_K_gp:.4f} vs K_lin={float(K_lin):.4f})")
+
+        # Save plot
+        os.makedirs(cli.out_dir, exist_ok=True)
+        out_png = os.path.join(cli.out_dir, f"L_curve_{dset}.png")
+        fig, axes = plt.subplots(1, 2, figsize=(14, 5))
+        fig.suptitle(
+            f"$L^*_t$ curve — {dset.upper()}   "
+            f"(N={z0_all.shape[0]}, n={z0_all.shape[1]}, d={d})",
+            fontsize=15, fontweight="bold", y=1.01,
+        )
+        y_max = max(float(L_lin.max()), float(best_L_gp.max())) * 1.15
+        for ax, L_c, integ, K, label, color in zip(
+            axes,
+            [L_lin, best_L_gp],
+            [integ_lin, best_integ_gp],
+            [K_lin, best_K_gp],
+            ["Linear interpolant (App. C.1)",
+             f"GP interpolant (App. C.2,  best $\\ell$={best_l:.2f})"],
+            ["steelblue", "darkorange"],
+        ):
+            ax.plot(t_grid.numpy(), L_c.numpy(), color=color, linewidth=2.5)
+            ax.fill_between(t_grid.numpy(), 0, L_c.numpy(), alpha=0.18, color=color)
+            ax.set_xlabel("Flow time  $t$", fontsize=13)
+            ax.set_ylabel("$L^*_t$  (spectral norm of Jacobian)", fontsize=12)
+            ax.set_title(label, fontsize=13, pad=8)
+            ax.set_ylim(0, y_max)
+            ax.text(0.04, 0.96,
+                    f"$\\int_0^1 L^*_t\\,dt$ = {float(integ):.4f}\n"
+                    f"$K_{{0,\\tau}}$ = {float(K):.4f}",
+                    transform=ax.transAxes, fontsize=11, verticalalignment="top",
+                    bbox=dict(boxstyle="round,pad=0.4", facecolor="wheat",
+                              edgecolor="gray", alpha=0.7))
+            ax.grid(True, linestyle="--", alpha=0.4)
+            ax.spines[["top", "right"]].set_visible(False)
+        plt.tight_layout(pad=1.5)
+        plt.savefig(out_png, dpi=150, bbox_inches="tight")
+        plt.close(fig)
+        print(f"  Figure saved: {out_png}")
+
+        all_results[dset] = {
+            "K_linear": float(K_lin), "integ_linear": float(integ_lin),
+            "K_gp":     best_K_gp,    "integ_gp":     best_integ_gp,
+            "best_l":   best_l,
+        }
 
     # ── Summary table ─────────────────────────────────────────────
     if all_results:
         print("\n" + "=" * 70)
-        print("  SUMMARY  —  K_{0,τ} = exp( ∫₀¹ L*_t dt )")
+        print("  SUMMARY  —  K_{0,τ} = exp( ∫₀¹ L*_t dt )   [best l per dataset]")
         print("=" * 70)
         print(f"  {'Dataset':<8}  {'K_linear':>10}  {'K_gp':>10}  "
-              f"{'K_lin/K_gp':>12}  {'GP reduction'}")
-        print("  " + "-" * 58)
+              f"{'best_l':>8}  {'K_lin/K_gp':>12}  {'GP reduction'}")
+        print("  " + "-" * 66)
         for name, res in all_results.items():
             kl, kg = res["K_linear"], res["K_gp"]
             ratio  = kl / kg if kg > 0 else float("inf")
             pct    = (kl - kg) / kl * 100 if kl > 0 else 0.0
             print(f"  {name.upper():<8}  {kl:>10.4f}  {kg:>10.4f}  "
-                  f"{ratio:>12.3f}  {pct:+.1f}%")
+                  f"{res['best_l']:>8.2f}  {ratio:>12.3f}  {pct:+.1f}%")
         print()
