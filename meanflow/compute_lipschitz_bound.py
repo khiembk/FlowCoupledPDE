@@ -425,7 +425,7 @@ if __name__ == "__main__":
     parser.add_argument("--data_dir", default="/scratch/user/u.kt348068/PDE_data",
                         help="Directory containing the .pt dataset files.")
     parser.add_argument("--datasets", nargs="+", default=["gs", "mpf", "lv"],
-                        choices=["gs", "mpf", "lv", "toy"],
+                        choices=["gs", "mpf", "lv", "bz", "thm", "toy"],
                         help="Datasets to evaluate.  'toy' runs the synthetic example.")
     parser.add_argument("--N_samples", type=int, default=50,
                         help="Number of training pairs to subsample.")
@@ -448,8 +448,10 @@ if __name__ == "__main__":
     cli = parser.parse_args()
 
     _TRAIN_RATIO = 0.6305
-    _FILE = {"gs": "gs_512.pt", "mpf": "mpf_512.pt", "lv": "lv_512.pt"}
-    _TYPE = {"gs": "2d",        "mpf": "2d",          "lv": "1d"}
+    _FILE = {"gs":  "gs_512.pt",  "mpf": "mpf_512.pt", "lv":  "lv_512.pt",
+             "bz":  "bz_512.pt",  "thm": "thm_512.pt"}
+    _TYPE = {"gs":  "2d",         "mpf": "2d",          "lv":  "1d",
+             "bz":  "1d",         "thm": "2d"}
 
     # ── Real-data loader ──────────────────────────────────────────
     def load_real_dataset(data_path, data_type, N_samples, n_spatial, seed):
