@@ -647,30 +647,27 @@ if __name__ == "__main__":
         out_png = os.path.join(cli.out_dir, f"L_curve_{dset}.png")
         fig, axes = plt.subplots(1, 2, figsize=(14, 5))
         fig.suptitle(
-            f"$L^*_t$ curve — {dset.upper()}   "
-            f"(N={z0_all.shape[0]}, n={z0_all.shape[1]}, d={d})",
+            f"{dset.upper()} — $L^*_t$ and $K_{{0,\\tau}}$",
             fontsize=15, fontweight="bold", y=1.01,
         )
         y_max = max(float(L_lin.max()), float(best_L_gp.max())) * 1.15
-        for ax, L_c, integ, K, label, color in zip(
+        for ax, L_c, K, label, color in zip(
             axes,
             [L_lin, best_L_gp],
-            [integ_lin, best_integ_gp],
             [K_lin, best_K_gp],
             ["Linear interpolant (App. C.1)",
-             f"GP interpolant (App. C.2,  best $\\ell$={best_l:.2f})"],
+             "GP interpolant (App. C.2)"],
             ["steelblue", "darkorange"],
         ):
             ax.plot(t_grid.numpy(), L_c.numpy(), color=color, linewidth=2.5)
             ax.fill_between(t_grid.numpy(), 0, L_c.numpy(), alpha=0.18, color=color)
             ax.set_xlabel("Flow time  $t$", fontsize=13)
-            ax.set_ylabel("$L^*_t$  (spectral norm of Jacobian)", fontsize=12)
+            ax.set_ylabel("$L^*_t$", fontsize=13)
             ax.set_title(label, fontsize=13, pad=8)
             ax.set_ylim(0, y_max)
             ax.text(0.04, 0.96,
-                    f"$\\int_0^1 L^*_t\\,dt$ = {float(integ):.4f}\n"
                     f"$K_{{0,\\tau}}$ = {float(K):.4f}",
-                    transform=ax.transAxes, fontsize=11, verticalalignment="top",
+                    transform=ax.transAxes, fontsize=12, verticalalignment="top",
                     bbox=dict(boxstyle="round,pad=0.4", facecolor="wheat",
                               edgecolor="gray", alpha=0.7))
             ax.grid(True, linestyle="--", alpha=0.4)
