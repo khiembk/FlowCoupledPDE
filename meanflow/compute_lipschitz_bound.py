@@ -429,8 +429,9 @@ if __name__ == "__main__":
                         help="Datasets to evaluate.  'toy' runs the synthetic example.")
     parser.add_argument("--N_samples", type=int, default=50,
                         help="Number of training pairs to subsample.")
-    parser.add_argument("--n_spatial", type=int, default=64,
-                        help="Target spatial points per process after subsampling. "
+    parser.add_argument("--n_spatial", type=int, default=8,
+                        help="Spatial points per process after subsampling (keep small, "
+                             "e.g. 8, so D=n*d is low-dimensional enough for NW regression). "
                              "For 2D data the actual count is (H//stride)^2 where "
                              "stride = H // ceil(sqrt(n_spatial)).")
     parser.add_argument("--T_quad", type=int, default=20,
@@ -449,8 +450,12 @@ if __name__ == "__main__":
         """
         Extract source/target pairs from a .pt dataset file.
 
+        Uses first-to-last snapshot pairs (full trajectory span τ) so that
+        velocities Ż = z^0 - z^1 are large and vary meaningfully across
+        different initial conditions — this is what K_{0,τ} bounds.
+        Using horizon=1 gives Ż ≈ 0, making K trivially ≈ 1.
+
         Returns z0_all [N, n_proc, d], z1_all [N, n_proc, d] (z-scored per process).
-        The GP length scale l should be set to sqrt(d+1) for the returned data.
         """
         torch.manual_seed(seed)
         data = torch.load(data_path, map_location="cpu").float()
@@ -461,11 +466,11 @@ if __name__ == "__main__":
             n_train = int(N_traj * _TRAIN_RATIO)
             data_tr = data[:n_train]
 
-            # All horizon-1 consecutive pairs → [n_train*N_env*(T-1), n_proc, H, W]
-            src = data_tr[:, :, :, :-1, :, :]
-            tgt = data_tr[:, :, :, 1:,  :, :]
-            src = src.permute(0, 1, 3, 2, 4, 5).reshape(-1, n_proc, H, W)
-            tgt = tgt.permute(0, 1, 3, 2, 4, 5).reshape(-1, n_proc, H, W)
+            # First (source) and last (target) snapshot of each trajectory
+            src = data_tr[:, :, :, 0,  :, :]   # [n_train, N_env, n_proc, H, W]
+            tgt = data_tr[:, :, :, -1, :, :]
+            src = src.reshape(-1, n_proc, H, W)  # [n_train*N_env, n_proc, H, W]
+            tgt = tgt.reshape(-1, n_proc, H, W)
 
             # Spatial subsampling → [N', n_proc, d]
             side   = max(1, int(np.ceil(np.sqrt(n_spatial))))
@@ -479,10 +484,10 @@ if __name__ == "__main__":
             n_train = int(N_traj * _TRAIN_RATIO)
             data_tr = data[:n_train]
 
-            src = data_tr[:, :, :, :-1, :]
-            tgt = data_tr[:, :, :, 1:,  :]
-            src = src.permute(0, 1, 3, 2, 4).reshape(-1, n_proc, L)
-            tgt = tgt.permute(0, 1, 3, 2, 4).reshape(-1, n_proc, L)
+            src = data_tr[:, :, :, 0,  :]   # [n_train, N_env, n_proc, L]
+            tgt = data_tr[:, :, :, -1, :]
+            src = src.reshape(-1, n_proc, L)
+            tgt = tgt.reshape(-1, n_proc, L)
 
             stride = max(1, L // n_spatial)
             src = src[:, :, ::stride]
