@@ -35,13 +35,14 @@ sys.path.insert(0, str(_BASELINES.parent / "meanflow"))  # data_loaders.*
 sys.path.insert(0, str(_BASELINES))                       # models.DiffusionPDE
 from data_loaders.grayscott_loader import build_grayscott_dataloader
 from data_loaders.lv_loader import build_lv_dataloader
+from data_loaders.bz_loader import build_bz_dataloader
 
 from models import DiffusionPDE
 
 logger = logging.getLogger(__name__)
 
-_LV_SEQ_LEN = 256   # 16×16 = 256
-_LV_RES     = 16
+_1D_SEQ_LEN = 256   # 16×16 = 256
+_1D_RES     = 16
 
 
 # ── data helpers ──────────────────────────────────────────────────────────────
@@ -72,6 +73,13 @@ def build_dataloaders(args):
             _, test_loader = build_lv_dataloader(split="test", shuffle=False, drop_last=False, **kw)
         else:
             test_loader = val_loader
+    elif args.dataset == "bz":
+        _, train_loader = build_bz_dataloader(split="train", shuffle=True, **kw)
+        _, val_loader   = build_bz_dataloader(split="val",   shuffle=False, drop_last=False, **kw)
+        if has_test:
+            _, test_loader = build_bz_dataloader(split="test", shuffle=False, drop_last=False, **kw)
+        else:
+            test_loader = val_loader
     else:
         raise NotImplementedError(args.dataset)
 
@@ -87,8 +95,8 @@ def batch_to_xy(batch, is_1d: bool = False):
     tgt = torch.cat(list(batch[n_proc:]),  dim=1)
     if is_1d:
         B, C, L = src.shape
-        src = src.reshape(B, C, _LV_RES, _LV_RES)
-        tgt = tgt.reshape(B, C, _LV_RES, _LV_RES)
+        src = src.reshape(B, C, _1D_RES, _1D_RES)
+        tgt = tgt.reshape(B, C, _1D_RES, _1D_RES)
     return src, tgt
 
 
@@ -126,8 +134,8 @@ def evaluate(model: DiffusionPDE, loader, device, num_steps: int,
         pred = model(src, num_steps=num_steps)   # [B, n_proc, H, W] or 16×16
         if is_1d:
             B, C = pred.shape[:2]
-            pred = pred.reshape(B, C, _LV_SEQ_LEN)
-            tgt  = tgt.reshape(B, C, _LV_SEQ_LEN)
+            pred = pred.reshape(B, C, _1D_SEQ_LEN)
+            tgt  = tgt.reshape(B, C, _1D_SEQ_LEN)
         for i in range(n_proc):
             nums[i] += ((pred[:, i] - tgt[:, i]) ** 2).sum().item()
             dens[i] += (tgt[:, i] ** 2).sum().item()
@@ -213,7 +221,7 @@ def get_args():
     p = argparse.ArgumentParser("DiffusionPDE training for coupled PDEs")
 
     # dataset
-    p.add_argument("--dataset",     default="grayscott", choices=["grayscott", "multiphase", "lv"])
+    p.add_argument("--dataset",     default="grayscott", choices=["grayscott", "multiphase", "lv", "bz"])
     p.add_argument("--data_path",   required=True)
     p.add_argument("--train_ratio", type=float, default=0.6305)
     p.add_argument("--val_ratio",   type=float, default=0.1232)
@@ -275,7 +283,7 @@ def main():
     device = torch.device(args.device if torch.cuda.is_available() else "cpu")
     logger.info(f"Device: {device}")
 
-    is_1d = (args.dataset == "lv")
+    is_1d = args.dataset in ("lv", "bz")
 
     # ── data ──────────────────────────────────────────────────────────────────
     train_loader, val_loader, test_loader = build_dataloaders(args)
