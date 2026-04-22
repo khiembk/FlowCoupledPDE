@@ -20,11 +20,12 @@ from pathlib import Path
 import torch
 
 REPO = Path(__file__).resolve().parent.parent
-# baselines/ for NaiveMeanFlow; meanflow/ not needed here
-sys.path.insert(0, str(REPO / "baselines"))
+# Insert baselines/models/ directly to avoid triggering __init__.py
+# (which imports DiffusionPDE and has heavy deps not needed here)
+sys.path.insert(0, str(REPO / "baselines" / "models"))
 sys.path.insert(0, str(REPO / "meanflow"))
 
-from models.naive_flow import build_naive_flow_model  # noqa: E402
+from naive_flow import build_naive_flow_model  # noqa: E402
 
 
 # ── helpers ───────────────────────────────────────────────────────────────────
