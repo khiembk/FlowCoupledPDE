@@ -49,18 +49,20 @@ _1D_RES     = 16
 # ── data helpers ──────────────────────────────────────────────────────────────
 
 def build_dataloaders(args):
-    kw = dict(
+    base_kw = dict(
         data_path=args.data_path,
         batch_size=args.batch_size,
         num_workers=args.num_workers,
         horizon=1,
-        normalize=False,
         train_ratio=args.train_ratio,
         val_ratio=args.val_ratio,
     )
+    # grayscott/lv loaders accept normalize; bz/thm do not
+    norm_kw = {**base_kw, "normalize": False}
     has_test = (args.train_ratio + args.val_ratio) < 1.0
 
     if args.dataset in ("grayscott", "multiphase"):
+        kw = norm_kw
         _, train_loader = build_grayscott_dataloader(split="train", shuffle=True, **kw)
         _, val_loader   = build_grayscott_dataloader(split="val",   shuffle=False, drop_last=False, **kw)
         if has_test:
@@ -68,6 +70,7 @@ def build_dataloaders(args):
         else:
             test_loader = val_loader
     elif args.dataset == "lv":
+        kw = norm_kw
         _, train_loader = build_lv_dataloader(split="train", shuffle=True, **kw)
         _, val_loader   = build_lv_dataloader(split="val",   shuffle=False, drop_last=False, **kw)
         if has_test:
@@ -75,6 +78,7 @@ def build_dataloaders(args):
         else:
             test_loader = val_loader
     elif args.dataset == "bz":
+        kw = base_kw
         _, train_loader = build_bz_dataloader(split="train", shuffle=True, **kw)
         _, val_loader   = build_bz_dataloader(split="val",   shuffle=False, drop_last=False, **kw)
         if has_test:
@@ -82,6 +86,7 @@ def build_dataloaders(args):
         else:
             test_loader = val_loader
     elif args.dataset == "thm":
+        kw = base_kw
         _, train_loader = build_thm_dataloader(split="train", shuffle=True, **kw)
         _, val_loader   = build_thm_dataloader(split="val",   shuffle=False, drop_last=False, **kw)
         if has_test:
