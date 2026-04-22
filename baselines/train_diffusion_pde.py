@@ -1,8 +1,11 @@
 """
 EDM-based conditional diffusion baseline for coupled PDE prediction.
 
-Trains DiffusionPDE (SongUNet + EDM preconditioning) on GS / MPF datasets.
+Trains DiffusionPDE (SongUNet + EDM preconditioning) on GS / MPF / LV datasets.
 Conditioning: source channels are concatenated with the noisy target.
+
+LV (1D, len=256): reshaped to 16×16 internally so the 2D SongUNet can be reused.
+Evaluation metrics are computed in the original 1D space.
 
 Usage (from baselines/):
     python train_diffusion_pde.py \
@@ -29,10 +32,14 @@ from torch.utils.tensorboard import SummaryWriter
 # ── project imports ───────────────────────────────────────────────────────────
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "meanflow"))
 from data_loaders.grayscott_loader import build_grayscott_dataloader
+from data_loaders.lv_loader import build_lv_dataloader
 
 from models import DiffusionPDE
 
 logger = logging.getLogger(__name__)
+
+_LV_SEQ_LEN = 256   # 16×16 = 256
+_LV_RES     = 16
 
 
 # ── data helpers ──────────────────────────────────────────────────────────────
@@ -47,34 +54,52 @@ def build_dataloaders(args):
         train_ratio=args.train_ratio,
         val_ratio=args.val_ratio,
     )
-    _, train_loader = build_grayscott_dataloader(split="train", shuffle=True, **kw)
-    _, val_loader   = build_grayscott_dataloader(split="val",   shuffle=False, drop_last=False, **kw)
     has_test = (args.train_ratio + args.val_ratio) < 1.0
-    if has_test:
-        _, test_loader = build_grayscott_dataloader(split="test", shuffle=False, drop_last=False, **kw)
+
+    if args.dataset in ("grayscott", "multiphase"):
+        _, train_loader = build_grayscott_dataloader(split="train", shuffle=True, **kw)
+        _, val_loader   = build_grayscott_dataloader(split="val",   shuffle=False, drop_last=False, **kw)
+        if has_test:
+            _, test_loader = build_grayscott_dataloader(split="test", shuffle=False, drop_last=False, **kw)
+        else:
+            test_loader = val_loader
+    elif args.dataset == "lv":
+        _, train_loader = build_lv_dataloader(split="train", shuffle=True, **kw)
+        _, val_loader   = build_lv_dataloader(split="val",   shuffle=False, drop_last=False, **kw)
+        if has_test:
+            _, test_loader = build_lv_dataloader(split="test", shuffle=False, drop_last=False, **kw)
+        else:
+            test_loader = val_loader
     else:
-        test_loader = val_loader
+        raise NotImplementedError(args.dataset)
+
     return train_loader, val_loader, test_loader
 
 
-def batch_to_xy(batch):
-    """(z1_1, z1_2, z0_1, z0_2) → source [B,2,H,W], target [B,2,H,W]"""
+def batch_to_xy(batch, is_1d: bool = False):
+    """(z1_1, z1_2, z0_1, z0_2) → source, target  [B, n_proc, H, W]
+    For LV (is_1d=True): input [B,2,256] is reshaped to [B,2,16,16].
+    """
     n_proc = len(batch) // 2
     src = torch.cat(list(batch[:n_proc]),  dim=1)
     tgt = torch.cat(list(batch[n_proc:]),  dim=1)
+    if is_1d:
+        B, C, L = src.shape
+        src = src.reshape(B, C, _LV_RES, _LV_RES)
+        tgt = tgt.reshape(B, C, _LV_RES, _LV_RES)
     return src, tgt
 
 
-def compute_norm_stats(loader, n_proc: int, device):
+def compute_norm_stats(loader, n_proc: int, device, is_1d: bool = False):
     """Compute per-channel mean and std over the training source (x) tensors."""
     sum_x  = torch.zeros(n_proc, device=device)
     sum_x2 = torch.zeros(n_proc, device=device)
     count  = 0
     for batch in loader:
-        src, _ = batch_to_xy(batch)
-        src = src.to(device)          # [B, n_proc, H, W]
+        src, _ = batch_to_xy(batch, is_1d)
+        src = src.to(device)
         B = src.shape[0]
-        flat = src.view(B, n_proc, -1)   # [B, n_proc, H*W]
+        flat = src.view(B, n_proc, -1)
         sum_x  += flat.sum(dim=(0, 2))
         sum_x2 += (flat ** 2).sum(dim=(0, 2))
         count  += B * flat.shape[2]
@@ -86,16 +111,21 @@ def compute_norm_stats(loader, n_proc: int, device):
 # ── evaluation ────────────────────────────────────────────────────────────────
 
 @torch.no_grad()
-def evaluate(model: DiffusionPDE, loader, device, num_steps: int) -> dict:
+def evaluate(model: DiffusionPDE, loader, device, num_steps: int,
+             is_1d: bool = False) -> dict:
     model.eval()
     n_proc = model.n_proc
     nums = [0.0] * n_proc
     dens = [0.0] * n_proc
 
     for batch in loader:
-        src, tgt = batch_to_xy(batch)
+        src, tgt = batch_to_xy(batch, is_1d)
         src, tgt = src.to(device), tgt.to(device)
-        pred = model(src, num_steps=num_steps)   # [B, n_proc, H, W]
+        pred = model(src, num_steps=num_steps)   # [B, n_proc, H, W] or 16×16
+        if is_1d:
+            B, C = pred.shape[:2]
+            pred = pred.reshape(B, C, _LV_SEQ_LEN)
+            tgt  = tgt.reshape(B, C, _LV_SEQ_LEN)
         for i in range(n_proc):
             nums[i] += ((pred[:, i] - tgt[:, i]) ** 2).sum().item()
             dens[i] += (tgt[:, i] ** 2).sum().item()
@@ -135,7 +165,8 @@ def load_checkpoint(model, optimizer, scheduler, args):
 
 # ── training loop ─────────────────────────────────────────────────────────────
 
-def train_one_epoch(model, loader, optimizer, scheduler, device, epoch, args, log_writer):
+def train_one_epoch(model, loader, optimizer, scheduler, device, epoch, args,
+                    log_writer, is_1d: bool = False):
     model.train()
     total_loss = 0.0
     n_batches  = 0
@@ -143,7 +174,7 @@ def train_one_epoch(model, loader, optimizer, scheduler, device, epoch, args, lo
     for step, batch in enumerate(loader):
         if step > 0 and args.test_run:
             break
-        src, tgt = batch_to_xy(batch)
+        src, tgt = batch_to_xy(batch, is_1d)
         src, tgt = src.to(device, non_blocking=True), tgt.to(device, non_blocking=True)
 
         optimizer.zero_grad(set_to_none=True)
@@ -180,7 +211,7 @@ def get_args():
     p = argparse.ArgumentParser("DiffusionPDE training for coupled PDEs")
 
     # dataset
-    p.add_argument("--dataset",     default="grayscott", choices=["grayscott", "multiphase"])
+    p.add_argument("--dataset",     default="grayscott", choices=["grayscott", "multiphase", "lv"])
     p.add_argument("--data_path",   required=True)
     p.add_argument("--train_ratio", type=float, default=0.6305)
     p.add_argument("--val_ratio",   type=float, default=0.1232)
@@ -242,6 +273,8 @@ def main():
     device = torch.device(args.device if torch.cuda.is_available() else "cpu")
     logger.info(f"Device: {device}")
 
+    is_1d = (args.dataset == "lv")
+
     # ── data ──────────────────────────────────────────────────────────────────
     train_loader, val_loader, test_loader = build_dataloaders(args)
     logger.info(
@@ -277,7 +310,7 @@ def main():
         logger.info(f"Loaded norm stats from {norm_stats_path}")
     else:
         logger.info("Computing normalisation stats from training set …")
-        mean, std = compute_norm_stats(train_loader, args.n_proc, device)
+        mean, std = compute_norm_stats(train_loader, args.n_proc, device, is_1d)
         torch.save({"mean": mean.cpu(), "std": std.cpu()}, norm_stats_path)
         logger.info(f"  mean={mean.tolist()}  std={std.tolist()}")
 
@@ -307,7 +340,7 @@ def main():
     log_writer = SummaryWriter(log_dir=args.output_dir)
 
     if args.eval_only:
-        metrics = evaluate(model, test_loader, device, args.num_steps)
+        metrics = evaluate(model, test_loader, device, args.num_steps, is_1d)
         logger.info(f"[eval only] test: {metrics}")
         return
 
@@ -316,10 +349,11 @@ def main():
     start_time = time.time()
 
     for epoch in range(start_epoch, args.epochs):
-        train_one_epoch(model, train_loader, optimizer, scheduler, device, epoch, args, log_writer)
+        train_one_epoch(model, train_loader, optimizer, scheduler,
+                        device, epoch, args, log_writer, is_1d)
 
         if (epoch + 1) % args.eval_frequency == 0 or epoch == args.epochs - 1:
-            val_metrics = evaluate(model, val_loader, device, args.eval_num_steps)
+            val_metrics = evaluate(model, val_loader, device, args.eval_num_steps, is_1d)
             logger.info(
                 f"Epoch {epoch + 1}  val: "
                 + "  ".join(f"{k}={v:.6f}" for k, v in val_metrics.items())
@@ -348,7 +382,7 @@ def main():
         model.data_std.copy_(std)
         logger.info(f"Loaded best checkpoint (epoch {state['epoch']}).")
 
-    test_metrics = evaluate(model, test_loader, device, args.num_steps)
+    test_metrics = evaluate(model, test_loader, device, args.num_steps, is_1d)
     logger.info("Final test: " + "  ".join(f"{k}={v:.6f}" for k, v in test_metrics.items()))
     for k, v in test_metrics.items():
         log_writer.add_scalar(f"test/{k}", v, args.epochs)
