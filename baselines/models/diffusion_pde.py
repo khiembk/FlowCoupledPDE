@@ -119,7 +119,7 @@ class DiffusionPDE(nn.Module):
         c_noise = sigma.log() / 4.0
 
         net_in = torch.cat([c_in * x_noisy, cond], dim=1)  # [B, 2*n_proc, H, W]
-        F_x    = self.unet(net_in, c_noise)
+        F_x    = self.unet(net_in, c_noise, None)           # class_labels=None (label_dim=0)
         return c_skip * x_noisy + c_out * F_x
 
     # ── training loss ─────────────────────────────────────────────────────────
