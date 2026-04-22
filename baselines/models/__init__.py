@@ -6,6 +6,7 @@ from .deeponet import DeepONet1d, DeepONet2d
 from .transolver import Transolver1d, Transolver2d
 from .cmwno import CMWNO1d, CMWNO2d
 from .compol import COMPOL1d, COMPOL2d
+from .diffusion_pde import DiffusionPDE
 
 __all__ = [
     "FNO1d", "FNO2d",
@@ -14,4 +15,5 @@ __all__ = [
     "Transolver1d", "Transolver2d",
     "CMWNO1d", "CMWNO2d",
     "COMPOL1d", "COMPOL2d",
+    "DiffusionPDE",
 ]

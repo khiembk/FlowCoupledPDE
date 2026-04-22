@@ -26,7 +26,7 @@ REPO = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO / "baselines"))
 
 from models import (   # noqa: E402
-    FNO2d, UFNO2d, DeepONet2d, Transolver2d, CMWNO2d, COMPOL2d,
+    FNO2d, UFNO2d, DeepONet2d, Transolver2d, CMWNO2d, COMPOL2d, DiffusionPDE,
 )
 
 
@@ -73,14 +73,19 @@ def _gs512_registry():
                         modes1=12, modes2=12, width=32, n_layers=4,
                         n_heads=4, padding=9, aggr_type="atn")
 
+    def diffusion_pde():
+        return DiffusionPDE(n_proc=n, img_resolution=64, model_channels=64,
+                            num_steps=20)
+
     return [
-        ("gs512_fno2d",        fno),
-        ("gs512_ufno2d",       ufno),
-        ("gs512_deeponet2d",   deeponet),
-        ("gs512_transolver2d", transolver),
-        ("gs512_cmwno2d",      cmwno),
-        ("gs512_compol2d_rnn", compol_rnn),
-        ("gs512_compol2d_atn", compol_atn),
+        ("gs512_fno2d",          fno),
+        ("gs512_ufno2d",         ufno),
+        ("gs512_deeponet2d",     deeponet),
+        ("gs512_transolver2d",   transolver),
+        ("gs512_cmwno2d",        cmwno),
+        ("gs512_compol2d_rnn",   compol_rnn),
+        ("gs512_compol2d_atn",   compol_atn),
+        ("gs512_diffusion_pde",  diffusion_pde),
     ]
 
 
