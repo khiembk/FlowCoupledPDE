@@ -6,7 +6,7 @@
 #SBATCH --cpus-per-task=4
 #SBATCH --gres=gpu:1
 #SBATCH --mem=32G
-#SBATCH --time=00:30:00
+#SBATCH --time=01:00:00
 #SBATCH --output=%x_%j.out
 #SBATCH --error=%x_%j.err
 
@@ -17,9 +17,21 @@ CKPT=/scratch/user/u.kt348068/ckpt
 
 cd /home/u.kt348068/khiemtt/FlowCoupledPDE
 
-# ── NaiveMeanFlow (pdemeanflow env) ───────────────────────────────────────────
+# ── MeanFlow-GP + NaiveMeanFlow (pdemeanflow env) ─────────────────────────────
 conda activate pdemeanflow
 
+echo "========================================================"
+echo "  MeanFlow-GP rollout evaluation"
+echo "========================================================"
+python rollout/eval_rollout_meanflow.py \
+    --gt_path    $GT \
+    --ckpt_dir   $CKPT \
+    --models     gs_gp_512 \
+    --max_steps  5 \
+    --batch_size 32 \
+    --device     cuda
+
+echo ""
 echo "========================================================"
 echo "  NaiveMeanFlow rollout evaluation"
 echo "========================================================"
@@ -31,12 +43,12 @@ python rollout/eval_rollout_naive.py \
     --batch_size 32 \
     --device     cuda
 
-# ── DiffusionPDE (pde_baselines env) ─────────────────────────────────────────
+# ── DiffusionPDE + all baselines (pde_baselines env) ─────────────────────────
 conda activate pde_baselines
 
 echo ""
 echo "========================================================"
-echo "  DiffusionPDE rollout evaluation"
+echo "  DiffusionPDE + baseline rollout evaluation"
 echo "========================================================"
 python rollout/eval_rollout_baselines.py \
     --gt_path    $GT \
