@@ -30,7 +30,9 @@ import torch.nn as nn
 from torch.utils.tensorboard import SummaryWriter
 
 # ── project imports ───────────────────────────────────────────────────────────
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "meanflow"))
+_BASELINES = Path(__file__).resolve().parent
+sys.path.insert(0, str(_BASELINES.parent / "meanflow"))  # data_loaders.*
+sys.path.insert(0, str(_BASELINES))                       # models.DiffusionPDE
 from data_loaders.grayscott_loader import build_grayscott_dataloader
 from data_loaders.lv_loader import build_lv_dataloader
 
