@@ -55,6 +55,7 @@ docs/source/images
 
 outputs/
 output_dir/
+baselines/output/
 
 *logs/
 *.out

@@ -89,8 +89,17 @@ def _gs512_registry():
     ]
 
 
+def _gs512_nodiff_registry():
+    """GS-512 without DiffusionPDE and DeepONet."""
+    n = 2
+    entries = _gs512_registry()
+    skip = {"gs512_deeponet2d", "gs512_diffusion_pde"}
+    return [(name, fn) for name, fn in entries if name not in skip]
+
+
 REGISTRIES = {
-    "gs512": _gs512_registry,
+    "gs512":       _gs512_registry,
+    "gs512_nodiff": _gs512_nodiff_registry,
 }
 
 

@@ -26,7 +26,7 @@ import torch.nn as nn
 REPO = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO / "baselines"))
 
-from models import FNO1d, UFNO1d, COMPOL1d, DiffusionPDE  # noqa: E402
+from models import FNO1d, UFNO1d, COMPOL1d, CMWNO1d, DiffusionPDE  # noqa: E402
 
 _1D_RES     = 16
 _1D_SEQ_LEN = 256
@@ -49,16 +49,21 @@ def _lv512_registry():
         return COMPOL1d(in_channels=1, out_channels=1, n_proc=n,
                         modes=12, width=32, n_layers=4, aggr_type="atn")
 
+    def cmwno():
+        return CMWNO1d(in_channels=1, out_channels=1, n_proc=n,
+                       width=32, n_layers=4, k=2)
+
     def diffusion_pde():
         return DiffusionPDE(n_proc=n, img_resolution=_1D_RES,
                             model_channels=64, num_steps=20)
 
     # (ckpt_subdir, factory, is_1d_reshape)
     return [
-        ("lv512_fno1d",         fno,          False),
-        ("lv512_ufno1d",        ufno,         False),
-        ("lv512_compol1d_rnn",  compol_rnn,   False),
-        ("lv512_compol1d_atn",  compol_atn,   False),
+        ("lv512_fno1d",         fno,           False),
+        ("lv512_ufno1d",        ufno,          False),
+        ("lv512_compol1d_rnn",  compol_rnn,    False),
+        ("lv512_compol1d_atn",  compol_atn,    False),
+        ("lv512_cmwno1d",       cmwno,         False),
         ("lv512_diffusion_pde", diffusion_pde, True),
     ]
 
@@ -83,6 +88,21 @@ def _rollout(model: nn.Module, z0: torch.Tensor, n_steps: int, is_1d: bool):
         preds.append(pred)
         src = pred
     return preds
+
+
+def _remap_state_dict(name, state_dict):
+    """Fix CMWNO1d checkpoints: net{1,2}.* → nets.{0,1}.*"""
+    if "cmwno" not in name:
+        return state_dict
+    mapping = {"net1.": "nets.0.", "net2.": "nets.1."}
+    new = {}
+    for k, v in state_dict.items():
+        for old, new_prefix in mapping.items():
+            if k.startswith(old):
+                k = new_prefix + k[len(old):]
+                break
+        new[k] = v
+    return new
 
 
 def main():
@@ -121,7 +141,8 @@ def main():
 
         model = factory().to(device)
         ckpt  = torch.load(ckpt_path, map_location="cpu", weights_only=False)
-        model.load_state_dict(ckpt["model"], strict=True)
+        state = _remap_state_dict(name, ckpt["model"])
+        model.load_state_dict(state, strict=True)
         model.eval()
 
         nums = [0.0] * args.max_steps

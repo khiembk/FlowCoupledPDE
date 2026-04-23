@@ -41,7 +41,6 @@ _K    = 0.063
 _SIZE = 64
 _DX   = 1.0
 _T_PRED = 20.0
-_N_STEPS = 5          # simulate up to 5τ
 
 
 def _gs_rhs(t, uv_flat, size, dx, Du, Dv, F, k):
@@ -63,12 +62,12 @@ def _gs_rhs(t, uv_flat, size, dx, Du, Dv, F, k):
 
 
 def _simulate_from_ic(args):
-    """Run GS from a given IC for N_STEPS * T_pred time units."""
-    idx, uv_ic = args   # uv_ic: [2, H, W] numpy float32
+    """Run GS from a given IC for n_steps * T_pred time units."""
+    idx, uv_ic, n_steps = args   # uv_ic: [2, H, W] numpy float32
 
     uv0 = np.concatenate([uv_ic[0].ravel(), uv_ic[1].ravel()]).astype(np.float64)
-    t_end = _N_STEPS * _T_PRED
-    t_eval = [k * _T_PRED for k in range(1, _N_STEPS + 1)]  # [1τ, 2τ, 3τ, 4τ, 5τ]
+    t_end  = n_steps * _T_PRED
+    t_eval = [k * _T_PRED for k in range(1, n_steps + 1)]
 
     res = solve_ivp(
         _gs_rhs,
@@ -84,13 +83,11 @@ def _simulate_from_ic(args):
         print(f"  [Warning] traj {idx} failed: {res.message}", flush=True)
 
     N = _SIZE * _SIZE
-    # res.y shape: [2*N, N_STEPS]
-    # Build [n_chan=2, N_STEPS, H, W]
     snapshots = np.stack([
         np.stack([res.y[:N, s].reshape(_SIZE, _SIZE),
                   res.y[N:, s].reshape(_SIZE, _SIZE)], axis=0)
-        for s in range(_N_STEPS)
-    ], axis=1).astype(np.float32)   # [2, N_STEPS, H, W]
+        for s in range(n_steps)
+    ], axis=1).astype(np.float32)   # [2, n_steps, H, W]
 
     return idx, snapshots
 
@@ -101,6 +98,7 @@ def main():
     p.add_argument("--out_path",    required=True)
     p.add_argument("--train_ratio", type=float, default=0.6305)
     p.add_argument("--val_ratio",   type=float, default=0.1232)
+    p.add_argument("--n_steps",     type=int,   default=10)
     p.add_argument("--workers",     type=int,   default=8)
     args = p.parse_args()
 
@@ -121,12 +119,12 @@ def main():
     # Existing 1τ endpoint → [N_test, 2, H, W]
     gt_1tau = test_data[:, 0, :, 1, :, :].numpy()
 
-    job_args = [(i, ics[i]) for i in range(n_test)]
+    n_steps  = args.n_steps
+    job_args = [(i, ics[i], n_steps) for i in range(n_test)]
 
-    print(f"Simulating {n_test} test ICs × {_N_STEPS} steps "
+    print(f"Simulating {n_test} test ICs × {n_steps} steps "
           f"(T_pred={_T_PRED}) with {args.workers} workers …")
 
-    # results[i] = [2, N_STEPS, H, W]  (steps 1τ .. 5τ)
     results = [None] * n_test
     if args.workers > 1:
         with Pool(args.workers) as pool:
@@ -142,29 +140,24 @@ def main():
             if (i + 1) % 50 == 0:
                 print(f"  … {i+1}/{n_test}", flush=True)
 
-    # Stack: [N_test, 2, N_STEPS, H, W]  — steps 1τ..5τ
-    sim = torch.from_numpy(np.stack(results, axis=0))
+    sim = torch.from_numpy(np.stack(results, axis=0))  # [N_test, 2, n_steps, H, W]
 
-    # Build full rollout tensor: [N_test, 2, 6, H, W]
-    # dim 2: [0τ=IC, 1τ(existing), 2τ, 3τ, 4τ, 5τ]
-    ic_t  = torch.from_numpy(ics).unsqueeze(2)          # [N_test, 2, 1, H, W]
-    gt1_t = torch.from_numpy(gt_1tau).unsqueeze(2)      # [N_test, 2, 1, H, W]
-    # sim[:, :, 0] = 1τ (verified match), sim[:, :, 1..4] = 2τ..5τ
-    rollout = torch.cat([ic_t, gt1_t, sim[:, :, 1:, :, :]], dim=2)
-    # shape: [N_test, 2, 6, H, W]  — [0τ, 1τ, 2τ, 3τ, 4τ, 5τ]
-
-    # Verify: 1τ from sim should be close to existing 1τ
     sim_1tau = sim[:, :, 0, :, :]
     err = (sim_1tau - torch.from_numpy(gt_1tau)).abs().mean().item()
     print(f"\nVerification — mean |sim_1τ − existing_1τ| = {err:.6f}  "
           f"(should be ~0 if IC loaded correctly)")
+
+    ic_t  = torch.from_numpy(ics).unsqueeze(2)       # [N_test, 2, 1, H, W]
+    gt1_t = torch.from_numpy(gt_1tau).unsqueeze(2)   # [N_test, 2, 1, H, W]
+    rollout = torch.cat([ic_t, gt1_t, sim[:, :, 1:, :, :]], dim=2)
+    # shape: [N_test, 2, n_steps+1, H, W]  — [0τ, 1τ, ..., n_steps*τ]
 
     out_path = Path(args.out_path)
     out_path.parent.mkdir(parents=True, exist_ok=True)
     torch.save(rollout, out_path)
     print(f"\nSaved rollout GT → {out_path}")
     print(f"  shape: {tuple(rollout.shape)}")
-    print(f"  time axis: [0τ, 1τ, 2τ, 3τ, 4τ, 5τ]  (τ = T_pred = {_T_PRED} time units)")
+    print(f"  time axis: [0τ..{n_steps}τ]  (τ = T_pred = {_T_PRED} time units)")
 
 
 if __name__ == "__main__":
