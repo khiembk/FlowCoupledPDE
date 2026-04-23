@@ -1,15 +1,14 @@
 """
-Evaluate NaiveMeanFlow models on multi-step GS rollout.
+Evaluate NaiveMeanFlow on multi-step LV rollout.
 
-NaiveMeanFlow: each process is predicted independently (no cross-process
-coupling). Uses the same MeanFlow sampling interface as CoupledFlow but
-takes a list of per-process tensors.
+Ground truth: lv_rollout_gt.pt  shape [N_test, 2, 11, 256]
+  dim 2: [0tau, 1tau, ..., 10tau]
 
 Usage:
-    python rollout/eval_rollout_naive.py \
-        --gt_path  /scratch/user/u.kt348068/PDE_data/gs_rollout_gt.pt \
+    python rollout/eval_rollout_lv_naive.py \
+        --gt_path  /scratch/user/u.kt348068/PDE_data/lv_rollout_gt.pt \
         --ckpt_dir /scratch/user/u.kt348068/ckpt \
-        --models   naive_gs512 \
+        --models   naive_lv512 \
         --device   cuda
 """
 
@@ -20,30 +19,19 @@ from pathlib import Path
 import torch
 
 REPO = Path(__file__).resolve().parent.parent
-# Insert baselines/models/ directly to avoid triggering __init__.py
-# (which imports DiffusionPDE and has heavy deps not needed here)
 sys.path.insert(0, str(REPO / "baselines" / "models"))
 sys.path.insert(0, str(REPO / "meanflow"))
 
 from naive_flow import build_naive_flow_model  # noqa: E402
 
 
-# ── helpers ───────────────────────────────────────────────────────────────────
-
-DATASET_DIM = {
-    "grayscott": "2d", "multiphase": "2d", "thm": "2d",
-    "lv": "1d", "bz": "1d",
-}
-
-
-def _load_model(ckpt_path: str, device: torch.device):
+def _load_model(ckpt_path, device):
     ckpt = torch.load(ckpt_path, map_location="cpu", weights_only=False)
-    raw = ckpt["args"]
+    raw  = ckpt["args"]
     if isinstance(raw, dict):
         raw = argparse.Namespace(**raw)
 
-    # fill in fields that older checkpoints may not have saved
-    _defaults = dict(dropout=0.2, ema_decay=0.9999,
+    _defaults = dict(dropout=0.1, ema_decay=0.9999,
                      ema_decays=[0.99995, 0.9996],
                      norm_p=0.75, norm_eps=1e-3,
                      tr_sampler="v1", ratio=0.75,
@@ -53,19 +41,15 @@ def _load_model(ckpt_path: str, device: torch.device):
         if not hasattr(raw, k):
             setattr(raw, k, v)
 
-    dataset = getattr(raw, "dataset", "grayscott")
-    dim     = DATASET_DIM.get(dataset, "2d")
-    n_proc  = raw.n_proc
-
-    model = build_naive_flow_model(n_proc=n_proc, dim=dim, args=raw).to(device)
+    n_proc = raw.n_proc
+    model  = build_naive_flow_model(n_proc=n_proc, dim="1d", args=raw).to(device)
     model.load_state_dict(ckpt["model"], strict=False)
     model.eval()
     return model
 
 
 def _ema_variants(model):
-    """Return list of (label, nets_list) for all EMA copies."""
-    n = model.n_proc
+    n     = model.n_proc
     noema = [model._modules[f"net{i+1}"]     for i in range(n)]
     ema   = [model._modules[f"net{i+1}_ema"] for i in range(n)]
     variants = [("noema", noema), ("ema", ema)]
@@ -77,14 +61,10 @@ def _ema_variants(model):
 
 @torch.no_grad()
 def _rollout(model, z0, n_steps, nets):
-    """
-    z0   : [B, n_proc, H, W]
-    nets : list of n_proc networks
-    returns list of n_steps tensors [B, n_proc, *spatial]
-    """
-    n_proc = model.n_proc
+    # z0: [B, n_proc, 256]
+    n_proc  = model.n_proc
     sources = [z0[:, i:i+1] for i in range(n_proc)]
-    preds = []
+    preds   = []
     for _ in range(n_steps):
         pred_list = model.sample(sources, nets=nets)
         out = torch.cat(pred_list, dim=1)
@@ -93,15 +73,13 @@ def _rollout(model, z0, n_steps, nets):
     return preds
 
 
-# ── main ──────────────────────────────────────────────────────────────────────
-
 def main():
     p = argparse.ArgumentParser()
     p.add_argument("--gt_path",    required=True)
     p.add_argument("--ckpt_dir",   required=True)
-    p.add_argument("--models",     nargs="+", default=["naive_gs512"])
+    p.add_argument("--models",     nargs="+", default=["naive_lv512"])
     p.add_argument("--ckpt_name",  default="checkpoint-last.pth")
-    p.add_argument("--max_steps",  type=int, default=5)
+    p.add_argument("--max_steps",  type=int, default=10)
     p.add_argument("--batch_size", type=int, default=32)
     p.add_argument("--device",     default="cuda")
     args = p.parse_args()
@@ -109,11 +87,12 @@ def main():
     device = torch.device(args.device if torch.cuda.is_available() else "cpu")
 
     gt = torch.load(args.gt_path, map_location="cpu")
-    N_test, n_chan, n_t, H, W = gt.shape
-    assert n_t >= args.max_steps + 1
-    print(f"GT loaded: {tuple(gt.shape)}  (N={N_test}, steps=0τ..{n_t-1}τ)")
+    N_test, n_chan, n_t, L = gt.shape
+    assert n_t >= args.max_steps + 1, \
+        f"GT has {n_t} time steps but max_steps={args.max_steps}"
+    print(f"GT loaded: {tuple(gt.shape)}  (N={N_test}, L={L}, steps=0τ..{n_t-1}τ)")
 
-    z0_all = gt[:, :, 0, :, :]   # [N_test, n_proc, H, W]
+    z0_all = gt[:, :, 0, :]   # [N_test, n_proc, 256]
 
     header = f"\n{'Model/Variant':<35}" + "".join(f"  {k+1}τ      " for k in range(args.max_steps))
     sep    = "-" * len(header)
@@ -140,7 +119,7 @@ def main():
                 preds = _rollout(model, z0_b, args.max_steps, nets)
 
                 for k, pred_k in enumerate(preds):
-                    gt_k = gt[start:end, :, k + 1, :, :].to(device)
+                    gt_k = gt[start:end, :, k + 1, :].to(device)
                     nums[k] += ((pred_k - gt_k) ** 2).sum().item()
                     dens[k] += (gt_k ** 2).sum().item()
 
