@@ -8,6 +8,8 @@ from pathlib import Path
 from functools import partial
 from data_loaders.grayscott_loader import GrayScottCoupledDataset, build_grayscott_dataloader
 from data_loaders.lv_loader import build_lv_dataloader
+from data_loaders.gs_well_loader import build_gs_well_dataloader
+from data_loaders.dr2d_loader import build_dr2d_dataloader
 import numpy as np
 import torch
 import torch.backends.cudnn as cudnn
@@ -57,6 +59,19 @@ def get_data_loader(args, is_for_fid):
         )
         return train_loader
 
+    if args.dataset == "gs_well":
+        print("load gs_well...")
+        _, train_loader = build_gs_well_dataloader(
+            data_dir=args.data_path,
+            split="train",
+            batch_size=args.batch_size,
+            num_workers=args.num_workers,
+            horizon=1,
+            time_stride=getattr(args, "time_stride", 10),
+            resolution=64,
+        )
+        return train_loader
+
     if args.dataset == "lv":
         print("load Lotka-Volterra...")
         _, train_loader = build_lv_dataloader(
@@ -67,6 +82,19 @@ def get_data_loader(args, is_for_fid):
             horizon=1,
             train_ratio=getattr(args, "train_ratio", 0.8),
             val_ratio=getattr(args, "val_ratio", 0.1),
+        )
+        return train_loader
+
+    if args.dataset == "dr2d":
+        print("load PDEBench 2D Diffusion-Reaction...")
+        _, train_loader = build_dr2d_dataloader(
+            data_path=args.data_path,
+            split="train",
+            batch_size=args.batch_size,
+            num_workers=args.num_workers,
+            horizon=1,
+            time_stride=getattr(args, "time_stride", 1),
+            resolution=64,
         )
         return train_loader
 
@@ -153,7 +181,21 @@ def main(args):
     data_loader_train = get_data_loader(args, is_for_fid=False)
     data_loader_fid = get_data_loader(args, is_for_fid=True)
 
-    if args.dataset == "grayscott":
+    if args.dataset == "gs_well":
+        logger.info("Building GS-Well test dataloader for evaluation")
+        _, data_loader_val = build_gs_well_dataloader(
+            data_dir=args.data_path,
+            split="test",
+            batch_size=args.batch_size,
+            num_workers=args.num_workers,
+            horizon=1,
+            time_stride=getattr(args, "time_stride", 10),
+            resolution=64,
+            shuffle=False,
+            drop_last=False,
+        )
+        logger.info(f"Test dataset size: {len(data_loader_val.dataset)}, batches: {len(data_loader_val)}")
+    elif args.dataset == "grayscott":
         logger.info("Building Gray-Scott test dataloader for evaluation")
         _, data_loader_val = build_grayscott_dataloader(
             data_path=args.data_path,
@@ -180,6 +222,20 @@ def main(args):
             drop_last=False,
             train_ratio=getattr(args, "train_ratio", 0.8),
             val_ratio=getattr(args, "val_ratio", 0.1),
+        )
+        logger.info(f"Test dataset size: {len(data_loader_val.dataset)}, batches: {len(data_loader_val)}")
+    elif args.dataset == "dr2d":
+        logger.info("Building DR2D test dataloader for evaluation")
+        _, data_loader_val = build_dr2d_dataloader(
+            data_path=args.data_path,
+            split="test",
+            batch_size=args.batch_size,
+            num_workers=args.num_workers,
+            horizon=1,
+            time_stride=getattr(args, "time_stride", 1),
+            resolution=64,
+            shuffle=False,
+            drop_last=False,
         )
         logger.info(f"Test dataset size: {len(data_loader_val.dataset)}, batches: {len(data_loader_val)}")
     else:

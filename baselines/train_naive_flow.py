@@ -71,6 +71,7 @@ from data_loaders.grayscott_loader import build_grayscott_dataloader
 from data_loaders.lv_loader import build_lv_dataloader
 from data_loaders.bz_loader import build_bz_dataloader
 from data_loaders.thm_loader import build_thm_dataloader
+from data_loaders.dr2d_loader import build_dr2d_dataloader
 
 # Import naive_flow directly from baselines/models/ without triggering
 # baselines/models/__init__.py (which imports compol.py that uses Py3.10+ syntax).
@@ -88,6 +89,7 @@ DATASET_DIM = {
     "grayscott":  "2d",
     "multiphase": "2d",
     "thm":        "2d",
+    "dr2d":       "2d",
     "lv":         "1d",
     "bz":         "1d",
 }
@@ -98,6 +100,7 @@ DATASET_N_PROC = {
     "multiphase": 2,
     "bz":         3,
     "thm":        5,
+    "dr2d":       2,
 }
 
 
@@ -143,6 +146,20 @@ def build_dataloaders(args):
         _, val_loader   = build_thm_dataloader(split="val",   shuffle=False, drop_last=False, **kw_base)
         _, test_loader  = build_thm_dataloader(split="test",  shuffle=False, drop_last=False, **kw_base) \
                           if has_test else (None, val_loader)
+        return train_loader, val_loader, test_loader
+
+    if args.dataset == "dr2d":
+        kw = dict(
+            data_path=args.data_path,
+            batch_size=args.batch_size,
+            num_workers=args.num_workers,
+            horizon=1,
+            time_stride=getattr(args, "time_stride", 1),
+            resolution=64,
+        )
+        _, train_loader = build_dr2d_dataloader(split="train", shuffle=True,  drop_last=True,  **kw)
+        _, val_loader   = build_dr2d_dataloader(split="val",   shuffle=False, drop_last=False, **kw)
+        _, test_loader  = build_dr2d_dataloader(split="test",  shuffle=False, drop_last=False, **kw)
         return train_loader, val_loader, test_loader
 
     raise NotImplementedError(f"Dataset {args.dataset!r} not supported.")
@@ -323,7 +340,7 @@ def get_args():
 
     # dataset
     p.add_argument("--dataset", required=True,
-                   choices=["grayscott", "lv", "multiphase", "bz", "thm"])
+                   choices=["grayscott", "lv", "multiphase", "bz", "thm", "dr2d"])
     p.add_argument("--data_path", required=True)
     p.add_argument("--n_proc", type=int, default=None,
                    help="Number of processes. Defaults to the dataset's standard value "

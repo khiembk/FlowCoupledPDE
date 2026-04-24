@@ -25,21 +25,22 @@ class VectorValuedGP(nn.Module):
     and the instant velocity (d/dt posterior mean) is:
         u_ins(t)    = dw0/dt(t) * z_driven_0 + dw1/dt(t) * z_driven_1
 
-    The weight coefficients depend only on:
-        one_plus_D = 1 + ||z_driver_1 - z_driver_0||^2   (per sample)
-    and the length-scale ell (learnable).
+    Adaptive length-scale (fixed, not trained):
+        ell_sq = alpha * one_plus_D   where one_plus_D = 1 + ||z_driver_1 - z_driver_0||² / d
+
+    This makes the kernel ratio  a = exp(-1 / (2*alpha))  constant per sample,
+    independent of input scale, so GP behaviour is consistent across datasets.
+    alpha = exp(2 * log_length_scale) controls the correlation: larger alpha ->
+    higher a -> smoother, more endpoint-correlated interpolation.
 
     Reference: "Flow-based Framework Solving Multiple Processes PDEs", Sec. 3.3
     """
 
     def __init__(self, log_length_scale: float = 0.0):
         super().__init__()
-        # Learnable log length-scale; ell = exp(log_length_scale)
-        self.log_length_scale = nn.Parameter(torch.tensor(float(log_length_scale)))
-
-    @property
-    def length_scale(self) -> torch.Tensor:
-        return self.log_length_scale.exp()
+        # Fixed (non-trainable) scale factor: ell_sq = alpha * one_plus_D
+        # alpha = exp(2 * log_length_scale); default log_length_scale=0 -> alpha=1
+        self.alpha = float(torch.tensor(log_length_scale).mul(2).exp().item())
 
     def forward(
         self,
@@ -62,45 +63,35 @@ class VectorValuedGP(nn.Module):
             u_ins_driven: [B, C, ...]     d/dt(z_driven_t)
         """
         B = z_driver_0.shape[0]
-        t_s = t.view(B)                 # [B]
-        ell_sq = self.length_scale ** 2  # scalar
+        t_s = t.view(B)   # [B]
 
-        # D² = ||z_driver_1 - z_driver_0||² per sample, normalized by feature
-        # dimension so that ell is independent of spatial resolution.
-        # Without normalization D² ~ C*H*W * O(1), making a = exp(-D²/2ell²) ≈ 0
-        # for any reasonable ell, collapsing the GP to uncorrelated endpoints.
+        # D² = ||z_driver_1 - z_driver_0||² per sample, normalized by feature dim.
         d = z_driver_0[0].numel()  # C * H * W
-        D_sq = ((z_driver_1 - z_driver_0).flatten(1) ** 2).sum(dim=1) / d  # [B]
+        with torch.no_grad():
+            D_sq = ((z_driver_1 - z_driver_0).flatten(1) ** 2).sum(dim=1) / d  # [B]
+            one_plus_D = 1.0 + D_sq  # [B]
 
-        # Because z_driver_t = (1-t)*z_driver_0 + t*z_driver_1,
-        #   ||x* - x_0||² = t²  + ||z_driver_t - z_driver_0||²  (normalized)
-        #                 = t²  + t² * D²  = t²*(1 + D²)
-        #   ||x* - x_1||² = (1-t)²*(1 + D²)
-        #   ||x_0 - x_1||² =        (1 + D²)
-        one_plus_D = 1.0 + D_sq         # [B], O(1) after normalization
+            # Adaptive ell_sq: scales with input distance so a = exp(-1/(2*alpha)) is constant.
+            ell_sq = self.alpha * one_plus_D  # [B]
 
-        # Normalized SE kernel values (sigma_f² cancels in posterior mean)
-        k0 = torch.exp(-t_s ** 2           * one_plus_D / (2.0 * ell_sq))  # [B]
-        k1 = torch.exp(-(1.0 - t_s) ** 2  * one_plus_D / (2.0 * ell_sq))  # [B]
-        a  = torch.exp(-one_plus_D                       / (2.0 * ell_sq))  # [B]
+            # SE kernel values
+            k0 = torch.exp(-t_s ** 2           * one_plus_D / (2.0 * ell_sq))  # [B]
+            k1 = torch.exp(-(1.0 - t_s) ** 2  * one_plus_D / (2.0 * ell_sq))  # [B]
+            a  = torch.exp(-one_plus_D                       / (2.0 * ell_sq))  # [B]
 
-        # K_train = [[1, a], [a, 1]]  =>  K_train^{-1} = 1/(1-a²) * [[1,-a],[-a,1]]
-        denom = 1.0 - a ** 2 + 1e-8    # [B]
-        w0 = (k0 - a * k1) / denom     # [B]
-        w1 = (k1 - a * k0) / denom     # [B]
+            # K_train^{-1} weights
+            denom = 1.0 - a ** 2 + 1e-8   # [B]
+            w0 = (k0 - a * k1) / denom    # [B]
+            w1 = (k1 - a * k0) / denom    # [B]
+
+            # Time derivatives
+            dk0_dt = k0 * (-t_s          * one_plus_D / ell_sq)  # [B]
+            dk1_dt = k1 * ((1.0 - t_s)  * one_plus_D / ell_sq)  # [B]
+            dw0_dt = (dk0_dt - a * dk1_dt) / denom               # [B]
+            dw1_dt = (dk1_dt - a * dk0_dt) / denom               # [B]
 
         shape = (B,) + (1,) * (z_driven_0.ndim - 1)
-        z_driven_t = w0.view(shape) * z_driven_0 + w1.view(shape) * z_driven_1
-
-        # Time derivatives of kernel values
-        # dk0/dt = k0 * (-t * one_plus_D / ell²)
-        # dk1/dt = k1 * (+( 1-t) * one_plus_D / ell²)
-        dk0_dt = k0 * (-t_s           * one_plus_D / ell_sq)   # [B]
-        dk1_dt = k1 * ((1.0 - t_s)   * one_plus_D / ell_sq)   # [B]
-
-        dw0_dt = (dk0_dt - a * dk1_dt) / denom                  # [B]
-        dw1_dt = (dk1_dt - a * dk0_dt) / denom                  # [B]
-
+        z_driven_t   = w0.view(shape) * z_driven_0 + w1.view(shape) * z_driven_1
         u_ins_driven = dw0_dt.view(shape) * z_driven_0 + dw1_dt.view(shape) * z_driven_1
 
         return z_driven_t, u_ins_driven

@@ -37,6 +37,8 @@ from data_loaders.grayscott_loader import build_grayscott_dataloader
 from data_loaders.lv_loader import build_lv_dataloader
 from data_loaders.bz_loader import build_bz_dataloader
 from data_loaders.thm_loader import build_thm_dataloader
+from data_loaders.gs_well_loader import build_gs_well_dataloader
+from data_loaders.dr2d_loader import build_dr2d_dataloader
 
 from models import DiffusionPDE
 
@@ -93,6 +95,30 @@ def build_dataloaders(args):
             _, test_loader = build_thm_dataloader(split="test", shuffle=False, drop_last=False, **kw)
         else:
             test_loader = val_loader
+    elif args.dataset == "gs_well":
+        kw = dict(
+            data_dir=args.data_path,
+            batch_size=args.batch_size,
+            num_workers=args.num_workers,
+            horizon=1,
+            time_stride=getattr(args, "time_stride", 10),
+            resolution=64,
+        )
+        _, train_loader = build_gs_well_dataloader(split="train", shuffle=True,  drop_last=True,  **kw)
+        _, val_loader   = build_gs_well_dataloader(split="valid", shuffle=False, drop_last=False, **kw)
+        _, test_loader  = build_gs_well_dataloader(split="test",  shuffle=False, drop_last=False, **kw)
+    elif args.dataset == "dr2d":
+        kw = dict(
+            data_path=args.data_path,
+            batch_size=args.batch_size,
+            num_workers=args.num_workers,
+            horizon=1,
+            time_stride=getattr(args, "time_stride", 1),
+            resolution=64,
+        )
+        _, train_loader = build_dr2d_dataloader(split="train", shuffle=True,  drop_last=True,  **kw)
+        _, val_loader   = build_dr2d_dataloader(split="val",   shuffle=False, drop_last=False, **kw)
+        _, test_loader  = build_dr2d_dataloader(split="test",  shuffle=False, drop_last=False, **kw)
     else:
         raise NotImplementedError(args.dataset)
 
@@ -234,7 +260,7 @@ def get_args():
     p = argparse.ArgumentParser("DiffusionPDE training for coupled PDEs")
 
     # dataset
-    p.add_argument("--dataset",     default="grayscott", choices=["grayscott", "multiphase", "lv", "bz", "thm"])
+    p.add_argument("--dataset",     default="grayscott", choices=["grayscott", "multiphase", "lv", "bz", "thm", "gs_well", "dr2d"])
     p.add_argument("--data_path",   required=True)
     p.add_argument("--train_ratio", type=float, default=0.6305)
     p.add_argument("--val_ratio",   type=float, default=0.1232)
