@@ -1,0 +1,16 @@
+name: flow
+channels:
+  - pytorch
+  - nvidia
+  - conda-forge
+dependencies:
+  - python=3.10
+  - pytorch=2.1
+  - pytorch-cuda=12.1
+  - numpy<2
+  - h5py
+  - tensorboard
+  - scipy
+  - pip
+  - pip:
+    - torchmetrics

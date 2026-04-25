@@ -5,24 +5,19 @@ import sys
 import time
 from pathlib import Path
 
-from functools import partial
-from data_loaders.grayscott_loader import GrayScottCoupledDataset, build_grayscott_dataloader
+from data_loaders.grayscott_loader import build_grayscott_dataloader
 from data_loaders.lv_loader import build_lv_dataloader
 from data_loaders.gs_well_loader import build_gs_well_dataloader
-from data_loaders.dr2d_loader import build_dr2d_dataloader
 import numpy as np
 import torch
 import torch.backends.cudnn as cudnn
-import torchvision.datasets as datasets
 from models.model_configs import instantiate_coupled_model
 from train_arg_parser import get_args_parser
 from training import distributed_mode
-from training.data_transform import get_transform_cifar, get_transform_mnist
 
 from training.load_and_save import load_model, save_model
 from training.coupled_training_loop import train_coupled_one_epoch, train_combined_loss_step, train_combine_loss_squence_step, train_local_loss_step, evaluate_coupled_rel_l2
 from torchmetrics.aggregation import MeanMetric
-import models.rng as rng
 
 from torch.utils.tensorboard import SummaryWriter
 
@@ -43,11 +38,10 @@ def print_model(model):
     logger.info(f"Total params: {num_params}")
 
 
-def get_data_loader(args, is_for_fid):
-    
+def get_train_loader(args):
     if args.dataset == "grayscott":
-        print("load grayscott...")
-        train_set, train_loader = build_grayscott_dataloader(
+        logger.info("Loading Gray-Scott train set...")
+        _, loader = build_grayscott_dataloader(
             data_path=args.data_path,
             split="train",
             batch_size=args.batch_size,
@@ -57,11 +51,11 @@ def get_data_loader(args, is_for_fid):
             train_ratio=getattr(args, "train_ratio", 0.8),
             val_ratio=getattr(args, "val_ratio", 0.1),
         )
-        return train_loader
+        return loader
 
     if args.dataset == "gs_well":
-        print("load gs_well...")
-        _, train_loader = build_gs_well_dataloader(
+        logger.info("Loading GS-Well train set...")
+        _, loader = build_gs_well_dataloader(
             data_dir=args.data_path,
             split="train",
             batch_size=args.batch_size,
@@ -70,11 +64,11 @@ def get_data_loader(args, is_for_fid):
             time_stride=getattr(args, "time_stride", 10),
             resolution=64,
         )
-        return train_loader
+        return loader
 
     if args.dataset == "lv":
-        print("load Lotka-Volterra...")
-        _, train_loader = build_lv_dataloader(
+        logger.info("Loading Lotka-Volterra train set...")
+        _, loader = build_lv_dataloader(
             data_path=args.data_path,
             split="train",
             batch_size=args.batch_size,
@@ -83,61 +77,93 @@ def get_data_loader(args, is_for_fid):
             train_ratio=getattr(args, "train_ratio", 0.8),
             val_ratio=getattr(args, "val_ratio", 0.1),
         )
-        return train_loader
+        return loader
 
     if args.dataset == "dr2d":
-        print("load PDEBench 2D Diffusion-Reaction...")
-        _, train_loader = build_dr2d_dataloader(
+        logger.info("Loading DR2D train set...")
+        _, loader = build_grayscott_dataloader(
             data_path=args.data_path,
             split="train",
             batch_size=args.batch_size,
             num_workers=args.num_workers,
             horizon=1,
-            time_stride=getattr(args, "time_stride", 1),
+            normalize=False,
+            train_ratio=0.8,
+            val_ratio=0.1,
+        )
+        return loader
+
+    raise NotImplementedError(f"Unsupported dataset: {args.dataset!r}")
+
+
+def get_val_loader(args):
+    if args.dataset == "gs_well":
+        logger.info("Building GS-Well test dataloader for evaluation")
+        _, loader = build_gs_well_dataloader(
+            data_dir=args.data_path,
+            split="test",
+            batch_size=args.batch_size,
+            num_workers=args.num_workers,
+            horizon=1,
+            time_stride=getattr(args, "time_stride", 10),
             resolution=64,
+            shuffle=False,
+            drop_last=False,
         )
-        return train_loader
+        logger.info(f"Test dataset size: {len(loader.dataset)}, batches: {len(loader)}")
+        return loader
 
-
-
-    if args.dataset == "cifar10":
-        transforms = get_transform_cifar(is_for_fid)
-        dataset = datasets.CIFAR10(
-            root=args.data_path,
-            train=True,
-            download=True,
-            transform=transforms,
+    if args.dataset == "grayscott":
+        logger.info("Building Gray-Scott test dataloader for evaluation")
+        _, loader = build_grayscott_dataloader(
+            data_path=args.data_path,
+            split="test",
+            batch_size=args.batch_size,
+            num_workers=args.num_workers,
+            horizon=1,
+            normalize=False,
+            shuffle=False,
+            drop_last=False,
+            train_ratio=getattr(args, "train_ratio", 0.8),
+            val_ratio=getattr(args, "val_ratio", 0.1),
         )
-    elif args.dataset == "mnist":  # 3x32x32 MNIST for fast development
-        transforms = get_transform_mnist()
-        dataset = datasets.MNIST(
-            root=args.data_path,
-            train=True,
-            download=True,
-            transform=transforms,
+        logger.info(f"Test dataset size: {len(loader.dataset)}, batches: {len(loader)}")
+        return loader
+
+    if args.dataset == "lv":
+        logger.info("Building Lotka-Volterra test dataloader for evaluation")
+        _, loader = build_lv_dataloader(
+            data_path=args.data_path,
+            split="test",
+            batch_size=args.batch_size,
+            num_workers=args.num_workers,
+            horizon=1,
+            shuffle=False,
+            drop_last=False,
+            train_ratio=getattr(args, "train_ratio", 0.8),
+            val_ratio=getattr(args, "val_ratio", 0.1),
         )
-    else:
-        raise NotImplementedError(f"Unsupported dataset {args.dataset}")
+        logger.info(f"Test dataset size: {len(loader.dataset)}, batches: {len(loader)}")
+        return loader
 
-    logger.info(dataset)
+    if args.dataset == "dr2d":
+        logger.info("Building DR2D test dataloader for evaluation")
+        _, loader = build_grayscott_dataloader(
+            data_path=args.data_path,
+            split="test",
+            batch_size=args.batch_size,
+            num_workers=args.num_workers,
+            horizon=1,
+            normalize=False,
+            shuffle=False,
+            drop_last=False,
+            train_ratio=0.8,
+            val_ratio=0.1,
+        )
+        logger.info(f"Test dataset size: {len(loader.dataset)}, batches: {len(loader)}")
+        return loader
 
-    logger.info("Intializing DataLoader")
-    num_tasks = distributed_mode.get_world_size()
-    global_rank = distributed_mode.get_rank()
-    sampler = torch.utils.data.DistributedSampler(
-        dataset, num_replicas=num_tasks, rank=global_rank, shuffle=True
-    )
-    data_loader = torch.utils.data.DataLoader(
-        dataset,
-        sampler=sampler,
-        worker_init_fn=partial(rng.worker_init_fn, rank=global_rank),
-        batch_size=args.batch_size,
-        num_workers=args.num_workers,
-        pin_memory=args.pin_mem,
-        drop_last=not is_for_fid,  # for FID evaluation, we want to keep all samples
-    )
-    logger.info(str(sampler))
-    return data_loader
+    return None
 
 
 def main(args):
@@ -160,86 +186,23 @@ def main(args):
     logger.info("job dir: {}".format(os.path.dirname(os.path.realpath(__file__))))
     logger.info("{}".format(args).replace(", ", ",\n"))
     if distributed_mode.is_main_process():
-        # create tensorboard
         os.makedirs(args.output_dir, exist_ok=True)
         log_writer = SummaryWriter(log_dir=args.output_dir)
         logger.info(f"Tensorboard writer created at {args.output_dir}")
     else:
         log_writer = None
-        logger.info('Writer not created.')
 
     device = torch.device(args.device)
 
-    # set the seeds
-    seed = args.seed + distributed_mode.get_rank()  # legacy. TODO: rng.fold_in 
+    seed = args.seed + distributed_mode.get_rank()
     torch.manual_seed(seed)
     np.random.seed(seed)
 
     cudnn.benchmark = True
 
     logger.info(f"Initializing Dataset: {args.dataset}")
-    data_loader_train = get_data_loader(args, is_for_fid=False)
-    data_loader_fid = get_data_loader(args, is_for_fid=True)
-
-    if args.dataset == "gs_well":
-        logger.info("Building GS-Well test dataloader for evaluation")
-        _, data_loader_val = build_gs_well_dataloader(
-            data_dir=args.data_path,
-            split="test",
-            batch_size=args.batch_size,
-            num_workers=args.num_workers,
-            horizon=1,
-            time_stride=getattr(args, "time_stride", 10),
-            resolution=64,
-            shuffle=False,
-            drop_last=False,
-        )
-        logger.info(f"Test dataset size: {len(data_loader_val.dataset)}, batches: {len(data_loader_val)}")
-    elif args.dataset == "grayscott":
-        logger.info("Building Gray-Scott test dataloader for evaluation")
-        _, data_loader_val = build_grayscott_dataloader(
-            data_path=args.data_path,
-            split="test",
-            batch_size=args.batch_size,
-            num_workers=args.num_workers,
-            horizon=1,
-            normalize=False,
-            shuffle=False,
-            drop_last=False,
-            train_ratio=getattr(args, "train_ratio", 0.8),
-            val_ratio=getattr(args, "val_ratio", 0.1),
-        )
-        logger.info(f"Test dataset size: {len(data_loader_val.dataset)}, batches: {len(data_loader_val)}")
-    elif args.dataset == "lv":
-        logger.info("Building Lotka-Volterra test dataloader for evaluation")
-        _, data_loader_val = build_lv_dataloader(
-            data_path=args.data_path,
-            split="test",
-            batch_size=args.batch_size,
-            num_workers=args.num_workers,
-            horizon=1,
-            shuffle=False,
-            drop_last=False,
-            train_ratio=getattr(args, "train_ratio", 0.8),
-            val_ratio=getattr(args, "val_ratio", 0.1),
-        )
-        logger.info(f"Test dataset size: {len(data_loader_val.dataset)}, batches: {len(data_loader_val)}")
-    elif args.dataset == "dr2d":
-        logger.info("Building DR2D test dataloader for evaluation")
-        _, data_loader_val = build_dr2d_dataloader(
-            data_path=args.data_path,
-            split="test",
-            batch_size=args.batch_size,
-            num_workers=args.num_workers,
-            horizon=1,
-            time_stride=getattr(args, "time_stride", 1),
-            resolution=64,
-            shuffle=False,
-            drop_last=False,
-        )
-        logger.info(f"Test dataset size: {len(data_loader_val.dataset)}, batches: {len(data_loader_val)}")
-    else:
-        data_loader_val = None
+    data_loader_train = get_train_loader(args)
+    data_loader_val = get_val_loader(args)
 
     # define the model
     logger.info("Initializing Model")
@@ -253,7 +216,6 @@ def main(args):
     eff_batch_size = args.batch_size * distributed_mode.get_world_size()
 
     logger.info(f"Learning rate: {args.lr:.2e}")
-
     logger.info(f"Effective batch size: {eff_batch_size}")
 
     if args.distributed:
@@ -277,7 +239,7 @@ def main(args):
     )
 
     warmup_iters = args.warmup_epochs * len(data_loader_train)
-    warmup_scheduler = torch.optim.lr_scheduler.LinearLR(optimizer, start_factor=1e-8 / args.lr, end_factor=1.0, total_iters=warmup_iters,)
+    warmup_scheduler = torch.optim.lr_scheduler.LinearLR(optimizer, start_factor=1e-8 / args.lr, end_factor=1.0, total_iters=warmup_iters)
     main_scheduler = torch.optim.lr_scheduler.ConstantLR(optimizer, total_iters=args.epochs * len(data_loader_train), factor=1.0)
     lr_schedule = torch.optim.lr_scheduler.SequentialLR(optimizer, schedulers=[warmup_scheduler, main_scheduler], milestones=[warmup_iters])
 
@@ -300,17 +262,17 @@ def main(args):
     )
 
     _train_step_fn = train_combine_loss_squence_step if args.seq_loss else train_combined_loss_step
-    compiled_train_step = torch.compile(
-        _train_step_fn,
-        disable=not args.compile,
-    )
+    if args.compile and hasattr(torch, 'compile'):
+        compiled_train_step = torch.compile(_train_step_fn)
+    else:
+        compiled_train_step = _train_step_fn
 
     batch_loss = MeanMetric().to(device, non_blocking=True)
     batch_time = MeanMetric().to(device, non_blocking=True)
     batch_loss.reset()
     batch_time.reset()
 
-    meters = {'batch_loss': batch_loss, 'batch_time': batch_time,}
+    meters = {'batch_loss': batch_loss, 'batch_time': batch_time}
 
     logger.info(f"Start from {args.start_epoch} to {args.epochs} epochs")
     start_time = time.time()
@@ -346,8 +308,7 @@ def main(args):
                 )
                 logging.info(f"Saved checkpoint to {args.output_dir}")
 
-            # Eval coupled model (rel-L2 on val split for grayscott, train for others):
-            eval_loader = data_loader_val if data_loader_val is not None else data_loader_fid
+            eval_loader = data_loader_val if data_loader_val is not None else data_loader_train
             eval_split = "test" if data_loader_val is not None else "train"
 
             eval_nets = [

@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
-#SBATCH --job-name=naive_dr2d
+#SBATCH --job-name=test_naive_dr2d
 #SBATCH --partition=gpu
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
-#SBATCH --cpus-per-task=8
+#SBATCH --cpus-per-task=4
 #SBATCH --gres=gpu:1
-#SBATCH --mem=32G
-#SBATCH --time=10:00:00
+#SBATCH --mem=16G
+#SBATCH --time=00:10:00
 #SBATCH --output=%x_%j.out
 #SBATCH --error=%x_%j.err
 
@@ -16,7 +16,7 @@ conda activate flow
 cd /home/u.kt348068/khiemtt/FlowCoupledPDE/baselines
 
 DATA=/scratch/user/u.kt348068/PDE_data/dr2d.pt
-OUT=/scratch/user/u.kt348068/ckpt/naive_dr2d
+OUT=/scratch/user/u.kt348068/ckpt/test_naive_dr2d
 
 unset SLURM_PROCID
 
@@ -26,9 +26,9 @@ python train_naive_flow.py \
     --output_dir $OUT \
     --batch_size 32 \
     --lr 6e-4 \
-    --epochs 500 \
-    --warmup_epochs 100 \
-    --eval_frequency 2 \
+    --epochs 2 \
+    --warmup_epochs 1 \
+    --eval_frequency 1 \
     --dropout 0.2 \
     --ema_decay 0.9999 \
     --ema_decays 0.99995 0.9996 \
@@ -40,6 +40,6 @@ python train_naive_flow.py \
     --ratio 0.75 \
     --norm_p 0.75 \
     --norm_eps 1e-3 \
-    --num_workers 8 \
-    --log_per_step 100 \
-    --auto_resume
+    --num_workers 4 \
+    --log_per_step 10 \
+    --test_run

@@ -71,7 +71,6 @@ from data_loaders.grayscott_loader import build_grayscott_dataloader
 from data_loaders.lv_loader import build_lv_dataloader
 from data_loaders.bz_loader import build_bz_dataloader
 from data_loaders.thm_loader import build_thm_dataloader
-from data_loaders.dr2d_loader import build_dr2d_dataloader
 
 # Import naive_flow directly from baselines/models/ without triggering
 # baselines/models/__init__.py (which imports compol.py that uses Py3.10+ syntax).
@@ -154,12 +153,13 @@ def build_dataloaders(args):
             batch_size=args.batch_size,
             num_workers=args.num_workers,
             horizon=1,
-            time_stride=getattr(args, "time_stride", 1),
-            resolution=64,
+            normalize=False,
+            train_ratio=0.8,
+            val_ratio=0.1,
         )
-        _, train_loader = build_dr2d_dataloader(split="train", shuffle=True,  drop_last=True,  **kw)
-        _, val_loader   = build_dr2d_dataloader(split="val",   shuffle=False, drop_last=False, **kw)
-        _, test_loader  = build_dr2d_dataloader(split="test",  shuffle=False, drop_last=False, **kw)
+        _, train_loader = build_grayscott_dataloader(split="train", shuffle=True,  drop_last=True,  **kw)
+        _, val_loader   = build_grayscott_dataloader(split="val",   shuffle=False, drop_last=False, **kw)
+        _, test_loader  = build_grayscott_dataloader(split="test",  shuffle=False, drop_last=False, **kw)
         return train_loader, val_loader, test_loader
 
     raise NotImplementedError(f"Dataset {args.dataset!r} not supported.")

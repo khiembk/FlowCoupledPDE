@@ -104,8 +104,8 @@ class DR2DDataset(Dataset):
         f = self._get_handle()
         key = self.keys[ki]
         # data shape: (T, H, W, 2) — channels last
-        x_t  = torch.from_numpy(f[key]["data"][t_in].copy())   # [H, W, 2]
-        x_tp = torch.from_numpy(f[key]["data"][t_out].copy())  # [H, W, 2]
+        x_t  = torch.tensor(f[key]["data"][t_in][()], dtype=torch.float32)   # [H, W, 2]
+        x_tp = torch.tensor(f[key]["data"][t_out][()], dtype=torch.float32)  # [H, W, 2]
 
         # channels last -> channels first: [2, H, W]
         x_t  = x_t.permute(2, 0, 1).float()

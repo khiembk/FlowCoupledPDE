@@ -6,19 +6,18 @@
 #SBATCH --cpus-per-task=8
 #SBATCH --gres=gpu:1
 #SBATCH --mem=32G
-#SBATCH --time=12:00:00
+#SBATCH --time=10:00:00
 #SBATCH --output=%x_%j.out
 #SBATCH --error=%x_%j.err
 
 source /sw/eb/sw/Miniconda3/23.10.0-1/etc/profile.d/conda.sh
-conda activate pdemeanflow
+conda activate flow
 
 cd /home/u.kt348068/khiemtt/FlowCoupledPDE/meanflow
 
-DATA=/scratch/user/u.kt348068/PDE_data/PDEBench/2D_diff_react.h5
+DATA=/scratch/user/u.kt348068/PDE_data/dr2d.pt
 OUT=/scratch/user/u.kt348068/ckpt/dr2d_wo_gp
 
-export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 unset SLURM_PROCID
 
 python train_coupled.py \
@@ -30,7 +29,7 @@ python train_coupled.py \
     --lr=0.0006 \
     --epochs=500 \
     --warmup_epochs=100 \
-    --eval_frequency=20 \
+    --eval_frequency=2 \
     --tr_sampler=v1 \
     --P_mean_t=-0.6 \
     --P_std_t=1.6 \

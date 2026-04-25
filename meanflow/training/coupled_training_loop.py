@@ -124,7 +124,7 @@ def train_coupled_one_epoch(
     compiled_train_step: Callable,
     data_loader: Iterable,
     optimizer: torch.optim.Optimizer,
-    lr_schedule: torch.optim.lr_scheduler.LRScheduler,
+    lr_schedule: torch.optim.lr_scheduler._LRScheduler,
     device: torch.device,
     epoch: int,
     log_writer: Any,

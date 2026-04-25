@@ -29,6 +29,13 @@ import torch
 import torch.nn as nn
 from torch.utils.tensorboard import SummaryWriter
 
+# PyTorch >=2.6 changed torch.load default to weights_only=True; patch for compatibility
+_orig_torch_load = torch.load
+def _patched_torch_load(*args, **kwargs):
+    kwargs.setdefault('weights_only', False)
+    return _orig_torch_load(*args, **kwargs)
+torch.load = _patched_torch_load
+
 # ── project imports ───────────────────────────────────────────────────────────
 _BASELINES = Path(__file__).resolve().parent
 sys.path.insert(0, str(_BASELINES.parent / "meanflow"))  # data_loaders.*
@@ -38,7 +45,6 @@ from data_loaders.lv_loader import build_lv_dataloader
 from data_loaders.bz_loader import build_bz_dataloader
 from data_loaders.thm_loader import build_thm_dataloader
 from data_loaders.gs_well_loader import build_gs_well_dataloader
-from data_loaders.dr2d_loader import build_dr2d_dataloader
 
 from models import DiffusionPDE
 
@@ -113,12 +119,13 @@ def build_dataloaders(args):
             batch_size=args.batch_size,
             num_workers=args.num_workers,
             horizon=1,
-            time_stride=getattr(args, "time_stride", 1),
-            resolution=64,
+            normalize=False,
+            train_ratio=0.8,
+            val_ratio=0.1,
         )
-        _, train_loader = build_dr2d_dataloader(split="train", shuffle=True,  drop_last=True,  **kw)
-        _, val_loader   = build_dr2d_dataloader(split="val",   shuffle=False, drop_last=False, **kw)
-        _, test_loader  = build_dr2d_dataloader(split="test",  shuffle=False, drop_last=False, **kw)
+        _, train_loader = build_grayscott_dataloader(split="train", shuffle=True,  drop_last=True,  **kw)
+        _, val_loader   = build_grayscott_dataloader(split="val",   shuffle=False, drop_last=False, **kw)
+        _, test_loader  = build_grayscott_dataloader(split="test",  shuffle=False, drop_last=False, **kw)
     else:
         raise NotImplementedError(args.dataset)
 
