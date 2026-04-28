@@ -43,6 +43,7 @@ from data_loaders.lv_loader import build_lv_dataloader
 from data_loaders.bz_loader import build_bz_dataloader
 from data_loaders.thm_loader import build_thm_dataloader
 from data_loaders.gs_well_loader import build_gs_well_dataloader
+from data_loaders.ns2d_loader import build_ns2d_dataloader
 
 from models import (
     FNO1d, FNO2d,
@@ -277,6 +278,19 @@ def build_dataloaders(args):
         _, val_loader   = build_grayscott_dataloader(split="val",   shuffle=False, drop_last=False, **kw)
         _, test_loader  = build_grayscott_dataloader(split="test",  shuffle=False, drop_last=False, **kw)
         return train_loader, val_loader, test_loader
+    if args.dataset == "ns2d":
+        kw = dict(
+            data_path=args.data_path,
+            batch_size=args.batch_size,
+            num_workers=args.num_workers,
+            horizon=1,
+            train_ratio=0.6667,
+            val_ratio=0.1667,
+        )
+        _, train_loader = build_ns2d_dataloader(split="train", shuffle=True,  drop_last=True,  **kw)
+        _, val_loader   = build_ns2d_dataloader(split="val",   shuffle=False, drop_last=False, **kw)
+        _, test_loader  = build_ns2d_dataloader(split="test",  shuffle=False, drop_last=False, **kw)
+        return train_loader, val_loader, test_loader
     raise NotImplementedError(f"Dataset {args.dataset!r} not supported yet. "
                               "Add a loader in build_dataloaders().")
 
@@ -412,7 +426,7 @@ def get_args():
     p = argparse.ArgumentParser("Baseline training for coupled PDEs")
 
     # ── dataset ──────────────────────────────────────────────────────────────
-    p.add_argument("--dataset", default="grayscott", choices=["grayscott", "lv", "multiphase", "bz", "thm", "gs_well", "dr2d"])
+    p.add_argument("--dataset", default="grayscott", choices=["grayscott", "lv", "multiphase", "bz", "thm", "gs_well", "dr2d", "ns2d"])
     p.add_argument("--data_path", required=True)
     p.add_argument("--train_ratio", type=float, default=0.8,
                    help="Fraction of trajectories used for training.")

@@ -45,6 +45,7 @@ from data_loaders.lv_loader import build_lv_dataloader
 from data_loaders.bz_loader import build_bz_dataloader
 from data_loaders.thm_loader import build_thm_dataloader
 from data_loaders.gs_well_loader import build_gs_well_dataloader
+from data_loaders.ns2d_loader import build_ns2d_dataloader
 
 from models import DiffusionPDE
 
@@ -126,6 +127,18 @@ def build_dataloaders(args):
         _, train_loader = build_grayscott_dataloader(split="train", shuffle=True,  drop_last=True,  **kw)
         _, val_loader   = build_grayscott_dataloader(split="val",   shuffle=False, drop_last=False, **kw)
         _, test_loader  = build_grayscott_dataloader(split="test",  shuffle=False, drop_last=False, **kw)
+    elif args.dataset == "ns2d":
+        kw = dict(
+            data_path=args.data_path,
+            batch_size=args.batch_size,
+            num_workers=args.num_workers,
+            horizon=1,
+            train_ratio=0.6667,
+            val_ratio=0.1667,
+        )
+        _, train_loader = build_ns2d_dataloader(split="train", shuffle=True,  drop_last=True,  **kw)
+        _, val_loader   = build_ns2d_dataloader(split="val",   shuffle=False, drop_last=False, **kw)
+        _, test_loader  = build_ns2d_dataloader(split="test",  shuffle=False, drop_last=False, **kw)
     else:
         raise NotImplementedError(args.dataset)
 
@@ -267,7 +280,7 @@ def get_args():
     p = argparse.ArgumentParser("DiffusionPDE training for coupled PDEs")
 
     # dataset
-    p.add_argument("--dataset",     default="grayscott", choices=["grayscott", "multiphase", "lv", "bz", "thm", "gs_well", "dr2d"])
+    p.add_argument("--dataset",     default="grayscott", choices=["grayscott", "multiphase", "lv", "bz", "thm", "gs_well", "dr2d", "ns2d"])
     p.add_argument("--data_path",   required=True)
     p.add_argument("--train_ratio", type=float, default=0.6305)
     p.add_argument("--val_ratio",   type=float, default=0.1232)
