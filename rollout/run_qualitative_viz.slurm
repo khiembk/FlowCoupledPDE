@@ -80,17 +80,18 @@ echo "========================================================"
 echo "  Plotting GS qualitative comparison"
 echo "========================================================"
 for SIDX in 0 1 2 3 4; do
+    # paper figure: GT row + per-row-normalised error maps (default)
     conda run -n flow python rollout/plot_qualitative_gs.py \
         --pred_dir  $PRED_GS \
         --out_dir   $FIGS \
-        --sample_idx $SIDX \
-        --combined
+        --sample_idx $SIDX
 
+    # also v channel
     conda run -n flow python rollout/plot_qualitative_gs.py \
         --pred_dir  $PRED_GS \
         --out_dir   $FIGS \
         --sample_idx $SIDX \
-        --show_error
+        --channel 1
 done
 
 echo ""
