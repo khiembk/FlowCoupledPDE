@@ -120,20 +120,7 @@ DICE coupling is generalized to N processes: driver is chosen by uniform categor
 
 JVP in the N-process case: `torch.func.jvp(u_func, (*zs, t_b, r_b), (*vs, dtdt, drdt))` with dynamic unpacking of all N processes.
 
-### Architecture Configs & Param Counts
 
-All configs in `COUPLED_CONFIGS` (`meanflow/models/model_configs.py`):
-
-| Arch key | Resolution | Params/net | Use case |
-|---|---|---|---|
-| `unet` | 64×64 2D | ~56M | GS, MPF full-size |
-| `unet32` | 32×32 2D | ~56M | Small 2D datasets |
-| `unet_lite` | 64×64 2D | ~7M | MPF small, THM (×5 nets) |
-| `unet32_lite` | 32×32 2D | ~7M | GS tiny dataset |
-| `unet1d` | 1D len=256 | ~4.5M | LV (2-process) |
-| `unet1d_bz` | 1D len=256 | ~4.5M | BZ (3-process, in_channels=3) |
-
-`MODEL_ARCHS` in `model_configs.py` maps arch key → class. `train_arg_parser.py` `--arch` choices must stay in sync with `MODEL_ARCHS`.
 
 ### Loss Functions (`meanflow/training/coupled_training_loop.py`)
 
